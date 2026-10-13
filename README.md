@@ -89,7 +89,7 @@ COOKIE_SECURE=true
 
 Restart the backend and open that HTTPS address in Safari or Chrome on your phone. Set the hostname and tunnel in your own Cloudflare account; this repository does not provision DNS or a tunnel. The backend serves both the built website and the API, so both use the same hostname. Cloudflare Pages alone cannot run this Node/PostgreSQL backend.
 
-The scanner uses the rear camera, with a bundled ZXing decoder for EAN-13, plus photo scanning and manual entry fallbacks. Camera frames stay on the device; only the decoded barcode and verification method reach the server. Torch controls appear only when offered by the camera. Real-device camera accuracy still needs a phone test on your HTTPS hostname.
+The scanner uses the rear camera, with a bundled ZXing decoder for EAN-13, plus photo scanning and manual entry fallbacks. It searches horizontal, vertical, upside-down and diagonal barcode orientations using additional rotated decoding passes. The camera scans diagonals over successive frames to limit phone CPU use; photo scanning tries all angles. Keep the complete barcode and its blank side margins visible, in focus and sufficiently lit. In-plane rotation support does not compensate for a hidden barcode or an extreme perspective angle. Camera frames stay on the device; only the decoded barcode and verification method reach the server. Torch controls appear only when offered by the camera. Real-device camera accuracy still needs a phone test on your HTTPS hostname.
 
 ## Catalogue and daily split
 
