@@ -3,6 +3,7 @@ import { readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './db.mjs';
+import { databaseConfig } from './database-config.mjs';
 import { handle } from './service.mjs';
 import { authenticate, bootstrapAdmin, hashPassword, verifyPassword, validPassword, newToken, tokenHash, publicMember } from './auth.mjs';
 const projectRoot=fileURLToPath(new URL('../',import.meta.url));
@@ -47,10 +48,10 @@ export async function createApp({db,origin,secureCookie=false}){
 }
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.json':'application/json','.woff2':'font/woff2'};
 export async function startServer(){
- if(!process.env.DATABASE_URL)throw new Error('Set DATABASE_URL in .env to your datecheck60 PostgreSQL database.');
+ const connection=databaseConfig();
  const port=Number(process.env.PORT||3001);const origin=process.env.APP_ORIGIN||`http://localhost:${port}`;const secureCookie=process.env.COOKIE_SECURE==='true';
  if(new URL(origin).protocol==='https:'&&!secureCookie)throw new Error('Set COOKIE_SECURE=true when using an HTTPS domain.');
- const db=await openDatabase(process.env.DATABASE_URL);await bootstrapAdmin(db,{username:process.env.ADMIN_USERNAME,password:process.env.ADMIN_PASSWORD,name:process.env.ADMIN_NAME});
+ const db=await openDatabase(connection);await bootstrapAdmin(db,{username:process.env.ADMIN_USERNAME,password:process.env.ADMIN_PASSWORD,name:process.env.ADMIN_NAME});
  const app=await createApp({db,origin,secureCookie});const dist=resolve(projectRoot,'dist');
  const server=createServer(async(req,res)=>{
   try{

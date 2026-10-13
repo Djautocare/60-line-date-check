@@ -1,8 +1,8 @@
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 export function sqlForPostgres(sql){let query=sql.replace(/INSERT OR IGNORE INTO/g,'INSERT INTO');if(sql.includes('INSERT OR IGNORE INTO'))query+=' ON CONFLICT DO NOTHING';let i=0;return query.replace(/\?/g,()=>`$${++i}`);}
-export async function openDatabase(connectionString,options={}){
- const pool=options.pool||new pg.Pool({connectionString,max:10,connectionTimeoutMillis:10000,idleTimeoutMillis:30000});
+export async function openDatabase(connection,options={}){
+ const pool=options.pool||new pg.Pool({...(typeof connection==='string'?{connectionString:connection}:connection),max:10,connectionTimeoutMillis:10000,idleTimeoutMillis:30000});
  const client=await pool.connect();
  try{
   await client.query('BEGIN');await client.query("SELECT pg_advisory_xact_lock(6030160)");

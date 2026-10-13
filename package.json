@@ -11,7 +11,8 @@
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "test": "node --test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:db": "node --env-file-if-exists=.env server/check-db.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

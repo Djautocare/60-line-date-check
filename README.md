@@ -48,14 +48,20 @@ Set:
 ```dotenv
 PORT=3001
 APP_ORIGIN=http://localhost:3001
-DATABASE_URL=postgresql://datecheck60_app:YOUR_PASSWORD@localhost:5432/datecheck60
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=datecheck60_app
+DB_PASSWORD='YOUR_POSTGRESQL_PASSWORD'
+DB_NAME=datecheck60
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=YOUR_STRONG_PASSWORD_AT_LEAST_12_CHARACTERS
 ADMIN_NAME=Your name
 COOKIE_SECURE=false
 ```
 
-URL-encode reserved characters in the database password in `DATABASE_URL` (for example `@` becomes `%40`). Keep `.env` on your PC; it is ignored by Git. The admin username/password are used only to create the first administrator. Changing these values later does not change an existing password. After first startup, remove `ADMIN_PASSWORD` from `.env` and change the account password within the app.
+Enter the actual PostgreSQL password in `DB_PASSWORD` and keep it in quotes so characters such as `#` are preserved. These separate fields do not need URL encoding. `DB_USER` must match the login that owns or has access to the database. If you created the database using your existing `postgres` account, use `DB_USER=postgres` and that account's password. Existing `DATABASE_URL` configurations still work; separate fields take precedence when `DB_PASSWORD` is set. Keep `.env` on your PC; it is ignored by Git. The admin username/password are used only to create the first administrator. Changing these values later does not change an existing password. After first startup, remove `ADMIN_PASSWORD` from `.env` and change the account password within the app.
+
+Run `npm run check:db` to confirm the username, host, port and database (the password is hidden) and test the connection. A failure here does not change any database passwords. Check the displayed host and port against pgAdmin's **server → Properties → Connection** and your working InventoryOS configuration.
 
 Run `npm start`, then visit **http://localhost:3001**. Sign in with your configured username and password.
 
