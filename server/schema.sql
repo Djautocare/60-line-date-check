@@ -1,0 +1,10 @@
+CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE members(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','staff')),active INTEGER NOT NULL DEFAULT 1 CHECK(active IN(0,1)),created TEXT NOT NULL);
+CREATE TABLE sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES members(id),expires BIGINT NOT NULL);
+CREATE INDEX sessions_expiry ON sessions(expires);
+CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT NOT NULL,plu TEXT NOT NULL,ean TEXT NOT NULL UNIQUE,section TEXT NOT NULL);
+CREATE TABLE selections(date TEXT PRIMARY KEY,items TEXT NOT NULL,created TEXT NOT NULL);
+CREATE TABLE rounds(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES members(id),date TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'daily',store TEXT NOT NULL DEFAULT '',started TEXT NOT NULL,finished TEXT);
+CREATE INDEX rounds_user_date ON rounds(user_id,date);
+CREATE TABLE lines(id TEXT PRIMARY KEY,round_id TEXT NOT NULL REFERENCES rounds(id),name TEXT NOT NULL,plu TEXT NOT NULL,ean TEXT NOT NULL,section TEXT NOT NULL,position INTEGER NOT NULL,verified_at TEXT,method TEXT,status TEXT CHECK(status IS NULL OR status IN('okay','out_of_date','not_stickered')),quantity INTEGER NOT NULL DEFAULT 0,saved_at TEXT);
+CREATE INDEX lines_round ON lines(round_id,position);
