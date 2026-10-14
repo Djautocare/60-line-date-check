@@ -1,7 +1,7 @@
 import {useEffect,useRef} from 'react';
-import {Download,MoreHorizontal,Printer} from 'lucide-react';
+import {Download,MoreHorizontal,Printer,Trash2} from 'lucide-react';
 
-export default function ReportActions({onDownload}:{onDownload:()=>void}){
+export default function ReportActions({onDownload,onDelete,disabled=false}:{onDownload:()=>void;onDelete?:()=>void;disabled?:boolean}){
  const menu=useRef<HTMLDetailsElement>(null);
  useEffect(()=>{
   function outside(event:PointerEvent){if(menu.current&&!menu.current.contains(event.target as Node))menu.current.open=false;}
@@ -10,5 +10,5 @@ export default function ReportActions({onDownload}:{onDownload:()=>void}){
   return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);};
  },[]);
  function choose(action:()=>void){if(menu.current)menu.current.open=false;action();}
- return <details ref={menu} className="report-actions"><summary aria-label="Report options" title="More report options"><MoreHorizontal size={22} aria-hidden="true"/></summary><div className="report-action-menu"><button onClick={()=>choose(onDownload)}><Download size={17} aria-hidden="true"/>Download CSV</button><button onClick={()=>choose(()=>window.print())}><Printer size={17} aria-hidden="true"/>Print report</button></div></details>;
+ return <details ref={menu} className="report-actions"><summary aria-label="Report options" aria-disabled={disabled} onClick={e=>{if(disabled)e.preventDefault();}} title="More report options"><MoreHorizontal size={22} aria-hidden="true"/></summary><div className="report-action-menu"><button disabled={disabled} onClick={()=>choose(onDownload)}><Download size={17} aria-hidden="true"/>Download CSV</button><button disabled={disabled} onClick={()=>choose(()=>window.print())}><Printer size={17} aria-hidden="true"/>Print report</button>{onDelete&&<button disabled={disabled} className="report-delete" onClick={()=>choose(onDelete)}><Trash2 size={17} aria-hidden="true"/>Delete report</button>}</div></details>;
 }

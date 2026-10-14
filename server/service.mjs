@@ -80,7 +80,7 @@ async function run(req, db, user) {
         return answer({rechecks:result.results,total:Number(count.total),upcoming:Number(upcoming.total),offset,limit,today:today()});
     }
     if(req.method==='POST'&&(path==='rotation-rechecks/verify'||path==='rotation-rechecks/save')){
-        const recheck=await db.prepare('SELECT q.*,l.ean FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=?').bind(String(body.id)).first();
+        const recheck=await db.prepare('SELECT q.*,l.ean,l.round_id FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=?').bind(String(body.id)).first();
         must(recheck,'Rotation recheck not found.',404);
         must(!recheck.status,'This rotation recheck has already been saved.',409);
         must(recheck.due_date<=today(),'This recheck is scheduled for a future date.');
@@ -97,10 +97,11 @@ async function run(req, db, user) {
         must(body.quantity===undefined||body.quantity===0,'Rotation rechecks do not take a quantity.');
         const checkedAt=now(),due=nextDate(today());
         const saved=await db.batch([
+            db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(recheck.round_id),
             db.prepare('UPDATE rotation_rechecks SET status=?,checked_at=?,checked_by=? WHERE id=? AND status IS NULL AND verified_by=?').bind(body.status,checkedAt,user.id,recheck.id,user.id),
             db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT origin_line_id || ':recheck:' || ?,origin_line_id,?,? FROM rotation_rechecks WHERE id=? AND status='rotation_issue' AND checked_at=? AND checked_by=? ON CONFLICT DO NOTHING`).bind(due,due,checkedAt,recheck.id,checkedAt,user.id)
         ]);
-        must(saved[0].rowCount>0,'This recheck was saved or rescanned by another person. Refresh and try again.',409);
+        must(saved[1].rowCount>0,'This recheck was saved or rescanned by another person. Refresh and try again.',409);
         return answer({ok:true,nextDue:body.status==='rotation_issue'?due:null});
     }
     if (req.method === 'GET' && path.startsWith('report/')) {
@@ -109,6 +110,21 @@ async function run(req, db, user) {
         must(round && (isAdmin || round.user_id === user.id), 'Report not found.', 404);
         const lines = await db.prepare('SELECT * FROM lines WHERE round_id=? ORDER BY position').bind(id).all();
         return answer({ round, lines: lines.results });
+    }
+    if(req.method==='POST'&&path==='reports/delete'){
+        admin();
+        const id=String(body.id||'');
+        must(id.length>0&&id.length<=200,'Select a report to delete.');
+        const report=await db.prepare('SELECT id FROM rounds WHERE id=?').bind(id).first();
+        must(report,'Report not found.',404);
+        const deleted=await db.batch([
+            db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(id),
+            db.prepare('DELETE FROM rotation_rechecks WHERE origin_line_id IN (SELECT id FROM lines WHERE round_id=?)').bind(id),
+            db.prepare('DELETE FROM lines WHERE round_id=?').bind(id),
+            db.prepare('DELETE FROM rounds WHERE id=?').bind(id)
+        ]);
+        must(deleted[3].rowCount>0,'Report not found.',404);
+        return answer({ok:true});
     }
     if (req.method === 'GET' && path === 'members') {
         admin();

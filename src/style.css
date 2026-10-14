@@ -33,3 +33,5 @@
  .report-detail td strong,.report-detail td small{color:black!important;font-size:9pt!important}
  .report-detail .result-badge,.report-detail .risk-badge{padding:0!important;color:black!important;background:none!important;white-space:normal!important;font-size:9pt!important}
 }
+
+.report-action-menu .report-delete{border-top:1px solid #e2e6de;border-radius:0 0 5px 5px;margin-top:4px;color:#9a5547}.report-action-menu .report-delete:hover{background:#fff0e9}.report-actions>summary[aria-disabled=true]{opacity:.45;cursor:not-allowed}.report-notice{padding:13px 16px;background:#e9f2ef;color:#4d796a;font-size:12px;border-radius:7px;margin-bottom:18px}@media print{.report-notice{display:none!important}}

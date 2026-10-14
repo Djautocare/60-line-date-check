@@ -70,3 +70,31 @@ test('rotation follow-ups require a new scan, recur next day, and preserve origi
   assert.equal((await call('rotation-rechecks',undefined,null)).status,401);
  }finally{await db.close();}
 });
+test('only admins can delete reports and all linked follow-ups are removed atomically',async()=>{
+ const {db,call,round}=await fixture();try{
+  await round('remove-this',staff,'2026-10-13');await round('keep-this',admin,'2026-10-13');
+  await db.prepare("INSERT INTO products(id,name,ean,plu,section) VALUES('catalogue','Bread','4088600303390','123456','Bread chiller')").run();
+  await db.prepare("INSERT INTO selections(date,items,created) VALUES('2026-10-13','[]','2026-10-13T12:00:00Z')").run();
+  for(const [id,r] of [['remove-line','remove-this'],['keep-line','keep-this']])await db.prepare("INSERT INTO lines(id,round_id,name,ean,plu,section,position,status,quantity,verified_at) VALUES(?,?,'Bread','4088600303390','123456','Bread chiller',1,'rotation_issue',0,'2026-10-13T12:00:00Z')").bind(id,r).run();
+  assert.equal((await call('rounds/finish',{id:'remove-this'},staff)).status,200);
+  assert.equal((await call('rounds/finish',{id:'keep-this'})).status,200);
+  await db.prepare("INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created,status,checked_at,checked_by) VALUES('old-history','remove-line','2026-10-12','2026-10-11T12:00:00Z','okay','2026-10-12T12:00:00Z','admin')").run();
+  assert.equal((await call('reports/delete',{id:'remove-this'},staff)).status,403);
+  assert.equal((await call('reports/delete',{id:'remove-this'},null)).status,401);
+  assert.equal((await call('report/remove-this',undefined,staff)).status,200);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM rotation_rechecks WHERE origin_line_id='remove-line'").first()).n,2);
+  assert.equal((await call('reports/delete',{id:'unknown'})).status,404);
+  assert.equal((await call('reports/delete',{id:'remove-this'})).status,200);
+  assert.equal((await call('report/remove-this')).status,404);
+  assert.equal((await call('reports/delete',{id:'remove-this'})).status,404);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM lines WHERE round_id='remove-this'").first()).n,0);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM rotation_rechecks WHERE origin_line_id='remove-line'").first()).n,0);
+  assert.equal((await call('report/keep-this')).status,200);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM rotation_rechecks WHERE origin_line_id='keep-line'").first()).n,1);
+  for(const table of ['products','selections'])assert.equal((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n,1);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM members').first()).n,2);
+  // An admin can remove an unfinished check as well.
+  await round('unfinished',staff,'2026-10-14');
+  assert.equal((await call('reports/delete',{id:'unfinished'})).status,200);
+ }finally{await db.close();}
+});
