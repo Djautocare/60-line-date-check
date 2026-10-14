@@ -62,3 +62,5 @@
  .report-filters label{flex:1 1 100%;min-width:0}
  input,select,textarea{font-size:16px!important;max-width:100%}
 }
+
+.scan-guide{box-shadow:0 0 0 100vmax #07160f70;pointer-events:none}.scan-guide i{z-index:1}.scan-guide>span{z-index:1}
