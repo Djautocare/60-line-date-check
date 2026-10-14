@@ -98,3 +98,26 @@ test('only admins can delete reports and all linked follow-ups are removed atomi
   assert.equal((await call('reports/delete',{id:'unfinished'})).status,200);
  }finally{await db.close();}
 });
+test('off-sale daily lines complete without a scan and off-sale rotation rechecks return tomorrow',async()=>{
+ const {db,call,round}=await fixture();try{
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  await round('unavailable',staff,today);
+  for(const [id,pos] of [['off-first',1],['off-second',2]])await db.prepare("INSERT INTO lines(id,round_id,name,ean,plu,section,position) VALUES(?,'unavailable','Bread','4088600303390','123456','Bread chiller',?)").bind(id,pos).run();
+  assert.equal((await call('rounds/finish',{id:'unavailable'},staff)).status,400);
+  for(const id of ['off-first','off-second'])assert.equal((await call('lines/save',{id,status:'off_sale',quantity:0},staff)).status,200);
+  assert.equal((await call('rounds/finish',{id:'unavailable'},staff)).status,200);
+  const report=(await call('reports',undefined,staff)).data.reports[0];assert.equal(Number(report.off_sale),2);assert.equal(Number(report.checked),2);
+  assert.equal(Number(report.rotation_issue),0);assert.equal((await call('rotation-rechecks')).data.upcoming,0);
+  assert.equal((await call('lines/save',{id:'off-first',status:'off_sale',quantity:0},staff)).status,400);
+  // An earlier rotation issue needs a follow-up, but the product is now out of stock.
+  await round('original-rotation',admin,'2026-10-13');
+  await db.prepare("INSERT INTO lines(id,round_id,name,ean,plu,section,position,status,quantity,verified_at) VALUES('rotation-origin','original-rotation','Bread','4088600303390','123456','Bread chiller',1,'rotation_issue',0,'2026-10-13T12:00:00Z')").run();
+  await db.prepare("INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) VALUES('rotation-today','rotation-origin',?,'2026-10-13T12:00:00Z')").bind(today).run();
+  assert.equal((await call('rotation-rechecks/save',{id:'rotation-today',status:'okay'},staff)).status,400);
+  const saved=await call('rotation-rechecks/save',{id:'rotation-today',status:'off_sale'},staff);assert.equal(saved.status,200);assert.equal(saved.data.nextDue,nextDate(today));
+  const history=(await call('rotation-rechecks?view=history')).data.rechecks[0];assert.equal(history.status,'off_sale');assert.equal(history.verified_at,null);assert.equal(history.verified_by,null);assert.equal(history.method,null);assert.equal(history.checked_by_name,'Colleague');
+  assert.equal((await call('rotation-rechecks')).data.upcoming,1);
+  const next=await db.prepare('SELECT * FROM rotation_rechecks WHERE status IS NULL').first();assert.equal(next.due_date,nextDate(today));
+  assert.equal((await call('rotation-rechecks/save',{id:next.id,status:'off_sale'},staff)).status,400);
+ }finally{await db.close();}
+});

@@ -64,3 +64,5 @@
 }
 
 .scan-guide{box-shadow:0 0 0 100vmax #07160f70;pointer-events:none}.scan-guide i{z-index:1}.scan-guide>span{z-index:1}
+
+.off-sale-option{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px;margin-bottom:18px;border:1px solid #dce4e4;border-radius:8px;background:#f4f7f7}.off-sale-option>div{min-width:0}.off-sale-option strong{font-size:12px;color:#4e6869}.off-sale-option p{font-size:11px;margin:5px 0 0}.off-sale-option.recorded{border-color:#a4bbbe;background:#edf4f5}.result-badge.off_sale,.line-status.off_sale{background:#edf4f5;color:#577d83}@media screen and (max-width:700px){.off-sale-option{flex-direction:column;align-items:stretch}.off-sale-option .button{width:100%;min-height:44px}}

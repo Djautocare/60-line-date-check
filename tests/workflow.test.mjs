@@ -34,16 +34,30 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('lines/verify',{id:lines[0].id,ean:'4088600303390',method:'camera'},staffCookie)).status,409);
  assert.equal((await call('lines/verify',{id:lines[0].id,ean:lines[0].ean,method:'camera'},staffCookie,'https://evil.example')).status,403);
  assert.equal((await call('rounds/finish',{id:round.id},staffCookie)).status,400);
+ assert.equal((await call('lines/save',{id:other.data.lines[0].id,status:'off_sale',quantity:0},staffCookie)).status,404);
  assert.equal((await call('lines/verify',{id:other.data.lines[0].id,ean:other.data.lines[0].ean,method:'camera'},staffCookie)).status,404);
  for(let i=0;i<lines.length;i++){
-  const l=lines[i];assert.equal((await call('lines/verify',{id:l.id,ean:l.ean,method:i?'camera':'manual'},staffCookie)).status,200);
+  const l=lines[i];
+  if(i===3){
+   assert.equal((await call('lines/save',{id:l.id,status:'off_sale',quantity:1},staffCookie)).status,400);
+   assert.equal((await call('lines/save',{id:l.id,status:'off_sale',quantity:0},staffCookie)).status,200);
+   let saved=(await call('report/'+round.id,undefined,staffCookie)).data.lines.find(x=>x.id===l.id);
+   assert.equal(saved.status,'off_sale');assert.equal(saved.verified_at,null);assert.equal(saved.method,null);assert.ok(saved.saved_at);
+   assert.equal((await call('lines/save',{id:l.id,status:'okay',quantity:0},staffCookie)).status,400);
+   assert.equal((await call('lines/verify',{id:l.id,ean:l.ean,method:'camera'},staffCookie)).status,200);
+   saved=(await call('report/'+round.id,undefined,staffCookie)).data.lines.find(x=>x.id===l.id);assert.equal(saved.status,null);assert.ok(saved.verified_at);
+   assert.equal((await call('lines/save',{id:l.id,status:'off_sale',quantity:0},staffCookie)).status,200);
+   saved=(await call('report/'+round.id,undefined,staffCookie)).data.lines.find(x=>x.id===l.id);assert.equal(saved.verified_at,null);assert.equal(saved.method,null);
+   continue;
+  }
+  assert.equal((await call('lines/verify',{id:l.id,ean:l.ean,method:i?'camera':'manual'},staffCookie)).status,200);
   if(i===2)assert.equal((await call('lines/save',{id:l.id,status:'rotation_issue',quantity:1},staffCookie)).status,400);
   if(i===0){assert.equal((await call('lines/save',{id:l.id,status:'out_of_date',quantity:0},staffCookie)).status,400);assert.equal((await call('lines/save',{id:l.id,status:'out_of_date',quantity:1.5},staffCookie)).status,400);}
   assert.equal((await call('lines/save',{id:l.id,status:i===0?'out_of_date':i===1?'not_stickered':i===2?'rotation_issue':'okay',quantity:i===0?3:i===1?2:0},staffCookie)).status,200);
  }
  assert.equal((await call('rounds/finish',{id:round.id},staffCookie)).status,200);
  assert.equal((await call('lines/save',{id:lines[0].id,status:'okay',quantity:0},staffCookie)).status,400);
- r=await call('reports',undefined,staffCookie);assert.equal(r.data.reports.length,1);assert.equal(Number(r.data.reports[0].out_of_date),3);assert.equal(Number(r.data.reports[0].not_stickered),2);assert.equal(Number(r.data.reports[0].rotation_issue),1);
+ r=await call('reports',undefined,staffCookie);assert.equal(r.data.reports.length,1);assert.equal(Number(r.data.reports[0].out_of_date),3);assert.equal(Number(r.data.reports[0].not_stickered),2);assert.equal(Number(r.data.reports[0].rotation_issue),1);assert.equal(Number(r.data.reports[0].off_sale),1);assert.equal(Number(r.data.reports[0].checked),60);
  // Saved catalogue snapshots remain stable after edits and even removal.
  const catalogue=await call('state');const selected=catalogue.data.products.find(p=>p.ean===lines[0].ean);assert.equal((await call('products',{...selected,name:'Renamed later',risk:'low'})).status,200);
  assert.equal((await call('products/lookup',{ean:selected.ean})).data.product.risk,'low');

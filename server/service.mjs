@@ -61,7 +61,7 @@ async function run(req, db, user) {
         if (from) { conditions.push('r.date>=?'); values.push(from); }
         if (to) { conditions.push('r.date<=?'); values.push(to); }
         const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-        const reports = await db.prepare(`SELECT r.*,m.name AS user_name,COUNT(l.id) AS total,SUM(CASE WHEN l.status IS NOT NULL THEN 1 ELSE 0 END) AS checked,SUM(CASE WHEN l.status='out_of_date' THEN l.quantity ELSE 0 END) AS out_of_date,SUM(CASE WHEN l.status='not_stickered' THEN l.quantity ELSE 0 END) AS not_stickered,SUM(CASE WHEN l.status='rotation_issue' THEN 1 ELSE 0 END) AS rotation_issue FROM rounds r JOIN members m ON m.id=r.user_id LEFT JOIN lines l ON l.round_id=r.id ${where} GROUP BY r.id,m.name ORDER BY r.date DESC,r.started DESC,r.id DESC LIMIT ? OFFSET ?`).bind(...values,limit,offset).all();
+        const reports = await db.prepare(`SELECT r.*,m.name AS user_name,COUNT(l.id) AS total,SUM(CASE WHEN l.status IS NOT NULL THEN 1 ELSE 0 END) AS checked,SUM(CASE WHEN l.status='out_of_date' THEN l.quantity ELSE 0 END) AS out_of_date,SUM(CASE WHEN l.status='not_stickered' THEN l.quantity ELSE 0 END) AS not_stickered,SUM(CASE WHEN l.status='rotation_issue' THEN 1 ELSE 0 END) AS rotation_issue,SUM(CASE WHEN l.status='off_sale' THEN 1 ELSE 0 END) AS off_sale FROM rounds r JOIN members m ON m.id=r.user_id LEFT JOIN lines l ON l.round_id=r.id ${where} GROUP BY r.id,m.name ORDER BY r.date DESC,r.started DESC,r.id DESC LIMIT ? OFFSET ?`).bind(...values,limit,offset).all();
         const count = await db.prepare(`SELECT COUNT(*) AS total FROM rounds r ${where}`).bind(...values).first();
         const checkers = await db.prepare(`SELECT DISTINCT m.id,m.name,m.username FROM members m JOIN rounds r ON r.user_id=m.id ${isAdmin ? '' : 'WHERE r.user_id=?'} ORDER BY m.name,m.username`).bind(...(isAdmin ? [] : [user.id])).all();
         return answer({reports:reports.results,total:Number(count.total),offset,limit,checkers:checkers.results});
@@ -92,17 +92,18 @@ async function run(req, db, user) {
             must(update.rowCount>0,'This rotation recheck has already been saved.',409);
             return answer({verified:true});
         }
-        must(recheck.verified_at&&recheck.verified_by===user.id,'Scan the product yourself before saving this recheck.');
-        must(['okay','rotation_issue'].includes(body.status),'Choose Okay now or Still a rotation issue.');
+        must(['okay','rotation_issue','off_sale'].includes(body.status),'Choose Okay now, Still a rotation issue or Off sale.');
+        const offSale=body.status==='off_sale';
+        must(offSale||(recheck.verified_at&&recheck.verified_by===user.id),'Scan the product yourself before saving this recheck.');
         must(body.quantity===undefined||body.quantity===0,'Rotation rechecks do not take a quantity.');
         const checkedAt=now(),due=nextDate(today());
         const saved=await db.batch([
             db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(recheck.round_id),
-            db.prepare('UPDATE rotation_rechecks SET status=?,checked_at=?,checked_by=? WHERE id=? AND status IS NULL AND verified_by=?').bind(body.status,checkedAt,user.id,recheck.id,user.id),
-            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT origin_line_id || ':recheck:' || ?,origin_line_id,?,? FROM rotation_rechecks WHERE id=? AND status='rotation_issue' AND checked_at=? AND checked_by=? ON CONFLICT DO NOTHING`).bind(due,due,checkedAt,recheck.id,checkedAt,user.id)
+            db.prepare('UPDATE rotation_rechecks SET status=?,checked_at=?,checked_by=?,verified_at=CASE WHEN ? THEN NULL ELSE verified_at END,verified_by=CASE WHEN ? THEN NULL ELSE verified_by END,method=CASE WHEN ? THEN NULL ELSE method END WHERE id=? AND status IS NULL AND (verified_by=? OR ?)').bind(body.status,checkedAt,user.id,offSale,offSale,offSale,recheck.id,user.id,offSale),
+            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT origin_line_id || ':recheck:' || ?,origin_line_id,?,? FROM rotation_rechecks WHERE id=? AND status IN ('rotation_issue','off_sale') AND checked_at=? AND checked_by=? ON CONFLICT DO NOTHING`).bind(due,due,checkedAt,recheck.id,checkedAt,user.id)
         ]);
         must(saved[1].rowCount>0,'This recheck was saved or rescanned by another person. Refresh and try again.',409);
-        return answer({ok:true,nextDue:body.status==='rotation_issue'?due:null});
+        return answer({ok:true,nextDue:body.status==='okay'?null:due});
     }
     if (req.method === 'GET' && path.startsWith('report/')) {
         const id = decodeURIComponent(path.slice(7));
@@ -230,26 +231,28 @@ async function run(req, db, user) {
             must(validEAN13(String(body.ean || '')), 'Enter a valid EAN-13 barcode.');
             must(body.ean === line.ean, 'Wrong product. Scan the barcode on the expected item.', 409);
             must(['camera', 'manual', 'photo'].includes(body.method), 'Invalid scan method.');
-            const updates = await db.batch([db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(line.round_id),db.prepare('UPDATE lines SET verified_at=?,method=? WHERE id=? AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)').bind(now(), body.method, line.id)]);
+            const updates = await db.batch([db.prepare(`SELECT id FROM rounds WHERE id=? FOR UPDATE`).bind(line.round_id),db.prepare(`UPDATE lines SET verified_at=?,method=?,status=CASE WHEN status='off_sale' THEN NULL ELSE status END,saved_at=CASE WHEN status='off_sale' THEN NULL ELSE saved_at END WHERE id=? AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)`).bind(now(), body.method, line.id)]);
             must(updates[1].rowCount > 0, 'This check has already been completed.');
             return answer({ verified: true });
         }
-        must(line.verified_at, 'Verify the product barcode before saving a result.');
-        must(validOutcome(body.status, body.quantity), body.status==='rotation_issue'?'Rotation issue is recorded without a quantity.':'Out of date and Not stickered need a whole quantity from 1 to 9,999.');
-        const updates = await db.batch([db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(line.round_id),db.prepare('UPDATE lines SET status=?,quantity=?,saved_at=? WHERE id=? AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)').bind(body.status, body.quantity, now(), line.id)]);
+        const offSale=body.status==='off_sale';
+        must(offSale||line.verified_at, 'Verify the product barcode before saving a result.');
+        must(validOutcome(body.status, body.quantity), ['rotation_issue','off_sale'].includes(body.status)?'Rotation issue and Off sale are recorded without a quantity.':'Out of date and Not stickered need a whole quantity from 1 to 9,999.');
+        const updates = await db.batch([db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(line.round_id),db.prepare('UPDATE lines SET status=?,quantity=?,saved_at=?,verified_at=CASE WHEN ? THEN NULL ELSE verified_at END,method=CASE WHEN ? THEN NULL ELSE method END WHERE id=? AND (? OR verified_at IS NOT NULL) AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)').bind(body.status, body.quantity, now(),offSale,offSale,line.id,offSale)]);
         must(updates[1].rowCount > 0, 'This check has already been completed.');
         return answer({ ok: true });
     }
     if (req.method === 'POST' && path === 'rounds/finish') {
         const round = await db.prepare('SELECT * FROM rounds WHERE id=? AND user_id=?').bind(String(body.id), user.id).first();
         must(round, 'Check not found.', 404);
-        const count = await db.prepare('SELECT COUNT(*) AS total,SUM(CASE WHEN status IS NULL OR verified_at IS NULL THEN 1 ELSE 0 END) AS remaining FROM lines WHERE round_id=?').bind(round.id).first();
-        must(count && count.total > 0 && Number(count.remaining) === 0, 'Every line must be verified and recorded before finishing.');
-        await db.batch([
+        const count = await db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN status IS NULL OR (status<>'off_sale' AND verified_at IS NULL) THEN 1 ELSE 0 END) AS remaining FROM lines WHERE round_id=?`).bind(round.id).first();
+        must(count && count.total > 0 && Number(count.remaining) === 0, 'Every line must be scanned and recorded, or marked Off sale, before finishing.');
+        const finished=await db.batch([
             db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(round.id),
-            db.prepare('UPDATE rounds SET finished=COALESCE(finished,?) WHERE id=? AND NOT EXISTS (SELECT 1 FROM lines WHERE round_id=rounds.id AND (status IS NULL OR verified_at IS NULL))').bind(now(),round.id),
+            db.prepare(`UPDATE rounds SET finished=COALESCE(finished,?) WHERE id=? AND NOT EXISTS (SELECT 1 FROM lines WHERE round_id=rounds.id AND (status IS NULL OR (status<>'off_sale' AND verified_at IS NULL)))`).bind(now(),round.id),
             db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT l.id || ':recheck:' || to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),l.id,to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),r.finished FROM lines l JOIN rounds r ON r.id=l.round_id WHERE r.id=? AND r.mode='daily' AND r.finished IS NOT NULL AND l.status='rotation_issue' ON CONFLICT DO NOTHING`).bind(round.id)
         ]);
+        must(finished[1].rowCount>0,'Every line must be scanned and recorded, or marked Off sale, before finishing.');
         return answer({ ok: true });
     }
     throw new Problem(404, 'This action was not found.');

@@ -5,6 +5,6 @@
  * @returns {T[]}
  */
 export function groupReportLines(lines) {
- const order = new Map([['out_of_date',0],['not_stickered',1],['rotation_issue',2],['okay',3]]);
- return [...lines].sort((a,b)=>(order.get(a.status??'')??4)-(order.get(b.status??'')??4)||a.position-b.position);
+ const order = new Map([['out_of_date',0],['not_stickered',1],['rotation_issue',2],['okay',3],['off_sale',4]]);
+ return [...lines].sort((a,b)=>(order.get(a.status??'')??5)-(order.get(b.status??'')??5)||a.position-b.position);
 }
