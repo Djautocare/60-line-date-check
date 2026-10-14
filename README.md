@@ -109,6 +109,14 @@ The selection uses weights High = 3, Normal = 1, Low = 0.5 with weighted random 
 
 Add at least 60 products to start a daily check. An admin can run a clearly labelled **practice check** with a smaller catalogue to test the workflow; it never counts as the daily 60-line check.
 
+## Reports and rotation rechecks
+
+Reports can be filtered by a single date, a Monday–Sunday week (choose any date in that week), a calendar month, an inclusive custom date range, or a relative time period (last 7, 30 or 90 days, this month, this year). Administrators can also filter by Checked by, using each account's ID so duplicate display names remain distinct. Staff can only access their own reports. Older records remain available through pagination. Download filtered summary exports every matching report, including matches beyond the current page. Opening and returning from a report preserves the filters.
+
+**Rotation rechecks** is a shared follow-up list for all signed-in colleagues. Finishing a real daily check queues each Rotation issue for the next London calendar day. Practice checks do not create follow-ups. These are additional to the daily 60 products. Overdue rechecks remain visible until recorded. Future rechecks cannot be completed early.
+
+Choose a due product, scan its expected EAN-13 (or use the recorded manual fallback), then select **Okay now** or **Still a rotation issue**. No quantity is required. The person saving the result must verify the barcode themselves. Still a rotation issue schedules another recheck for the day after it is recorded, including when checking an overdue item. Okay now stops the follow-up. Saved results appear in Recheck history with the original flagged date and person, the recheck result, scan method, and who checked it and when. Original reports are preserved. Each flagged line has its own follow-up history.
+
 ## Accounts and access
 
 Admins create staff usernames, names, temporary passwords and access levels. No email address is required. Staff can change passwords in Account settings; an administrator can reset other staff passwords and disable accounts. Staff can see only their own reports; admins can see all reports. The original owner account cannot be disabled or demoted by another administrator.
@@ -129,4 +137,4 @@ Automated workflow tests use a temporary PostgreSQL-compatible test database and
 
 ## Updating an existing installation
 
-This update adds risk levels and the Rotation issue result through database migration 2. Existing products and historical check lines start at Normal risk. Existing daily selections, catalogue entries, accounts and reports are preserved. Migration 1 is unchanged. Stop the DateCheck backend, copy the updated repository files into the same folder while keeping `.env`, run `npm run build`, and relaunch the backend. The migration is applied automatically at startup. Existing selections are not regenerated; the new weighting applies to the next day whose list has not yet been generated.
+Risk levels and the Rotation issue result use database migration 2. Next-day rotation rechecks use migration 3, which also queues rotation issues from previously completed daily checks using the day after their completion in London time. Existing products and historical check lines start at Normal risk. Existing daily selections, catalogue entries, accounts and reports are preserved. Migration 1 is unchanged. Stop the DateCheck backend, copy the updated repository files into the same folder while keeping `.env`, run `npm run build`, and relaunch the backend. The migration is applied automatically at startup. Existing selections are not regenerated; the new weighting applies to the next day whose list has not yet been generated.

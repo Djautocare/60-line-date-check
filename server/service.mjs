@@ -1,4 +1,5 @@
 import { validEAN13, validOutcome } from './ean.mjs';
+import {validDate,nextDate} from '../shared/report-dates.mjs';
 import {selectProducts,validRisk,RISK_WEIGHTS}from './selection.mjs';
 import { publicMember, hashPassword, validUsername, validPassword } from './auth.mjs';
 class Problem extends Error {
@@ -44,8 +45,63 @@ async function run(req, db, user) {
         return answer({ member: publicMember(member), date: today(), products: products.results, round, lines: lines.results, selection: selected ? JSON.parse(selected.items) : null, riskWeights:RISK_WEIGHTS });
     }
     if (req.method === 'GET' && path === 'reports') {
-        const reports = await db.prepare(`SELECT r.*,m.name AS user_name,COUNT(l.id) AS total,SUM(CASE WHEN l.status IS NOT NULL THEN 1 ELSE 0 END) AS checked,SUM(CASE WHEN l.status='out_of_date' THEN l.quantity ELSE 0 END) AS out_of_date,SUM(CASE WHEN l.status='not_stickered' THEN l.quantity ELSE 0 END) AS not_stickered,SUM(CASE WHEN l.status='rotation_issue' THEN 1 ELSE 0 END) AS rotation_issue FROM rounds r JOIN members m ON m.id=r.user_id LEFT JOIN lines l ON l.round_id=r.id ${isAdmin ? '' : 'WHERE r.user_id=?'} GROUP BY r.id,m.name ORDER BY r.started DESC LIMIT 100`).bind(...(isAdmin ? [] : [user.id])).all();
-        return answer({ reports: reports.results });
+        const params = new URL(req.url).searchParams;
+        const from = params.get('from') || '', to = params.get('to') || '';
+        const checkedBy = params.get('checkedBy') || '';
+        const rawOffset = params.get('offset') || '0';
+        must(!from || validDate(from), 'Choose a valid start date.');
+        must(!to || validDate(to), 'Choose a valid end date.');
+        must(!from || !to || from <= to, 'The end date must be on or after the start date.');
+        must(checkedBy.length <= 200, 'Invalid staff filter.');
+        must(isAdmin || !checkedBy || checkedBy === user.id, 'You can only view your own reports.', 403);
+        must(/^\d{1,9}$/.test(rawOffset), 'Invalid report page.');
+        const offset = Number(rawOffset), limit = 100;
+        const conditions = [], values = [];
+        if (!isAdmin || checkedBy) { conditions.push('r.user_id=?'); values.push(isAdmin ? checkedBy : user.id); }
+        if (from) { conditions.push('r.date>=?'); values.push(from); }
+        if (to) { conditions.push('r.date<=?'); values.push(to); }
+        const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+        const reports = await db.prepare(`SELECT r.*,m.name AS user_name,COUNT(l.id) AS total,SUM(CASE WHEN l.status IS NOT NULL THEN 1 ELSE 0 END) AS checked,SUM(CASE WHEN l.status='out_of_date' THEN l.quantity ELSE 0 END) AS out_of_date,SUM(CASE WHEN l.status='not_stickered' THEN l.quantity ELSE 0 END) AS not_stickered,SUM(CASE WHEN l.status='rotation_issue' THEN 1 ELSE 0 END) AS rotation_issue FROM rounds r JOIN members m ON m.id=r.user_id LEFT JOIN lines l ON l.round_id=r.id ${where} GROUP BY r.id,m.name ORDER BY r.date DESC,r.started DESC,r.id DESC LIMIT ? OFFSET ?`).bind(...values,limit,offset).all();
+        const count = await db.prepare(`SELECT COUNT(*) AS total FROM rounds r ${where}`).bind(...values).first();
+        const checkers = await db.prepare(`SELECT DISTINCT m.id,m.name,m.username FROM members m JOIN rounds r ON r.user_id=m.id ${isAdmin ? '' : 'WHERE r.user_id=?'} ORDER BY m.name,m.username`).bind(...(isAdmin ? [] : [user.id])).all();
+        return answer({reports:reports.results,total:Number(count.total),offset,limit,checkers:checkers.results});
+    }
+    if (req.method === 'GET' && path === 'rotation-rechecks') {
+        const params = new URL(req.url).searchParams;
+        const history = params.get('view') === 'history';
+        const rawOffset = params.get('offset') || '0';
+        must(/^\d{1,9}$/.test(rawOffset), 'Invalid recheck page.');
+        const offset=Number(rawOffset),limit=100;
+        const where=history?'q.status IS NOT NULL':'q.status IS NULL AND q.due_date<=?';
+        const values=history?[]:[today()];
+        const result=await db.prepare(`SELECT q.*,l.name,l.ean,l.plu,l.section,l.risk,r.date AS original_date,r.store,m.name AS flagged_by,c.name AS checked_by_name FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id JOIN rounds r ON r.id=l.round_id JOIN members m ON m.id=r.user_id LEFT JOIN members c ON c.id=q.checked_by WHERE ${where} ORDER BY q.due_date ${history?'DESC':'ASC'},q.id LIMIT ? OFFSET ?`).bind(...values,limit,offset).all();
+        const count=await db.prepare(`SELECT COUNT(*) AS total FROM rotation_rechecks q WHERE ${where}`).bind(...values).first();
+        const upcoming=await db.prepare('SELECT COUNT(*) AS total FROM rotation_rechecks WHERE status IS NULL AND due_date>?').bind(today()).first();
+        return answer({rechecks:result.results,total:Number(count.total),upcoming:Number(upcoming.total),offset,limit,today:today()});
+    }
+    if(req.method==='POST'&&(path==='rotation-rechecks/verify'||path==='rotation-rechecks/save')){
+        const recheck=await db.prepare('SELECT q.*,l.ean FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=?').bind(String(body.id)).first();
+        must(recheck,'Rotation recheck not found.',404);
+        must(!recheck.status,'This rotation recheck has already been saved.',409);
+        must(recheck.due_date<=today(),'This recheck is scheduled for a future date.');
+        if(path==='rotation-rechecks/verify'){
+            must(validEAN13(String(body.ean||'')),'Enter a valid EAN-13 barcode.');
+            must(body.ean===recheck.ean,'Wrong product. Scan the barcode on the expected item.',409);
+            must(['camera','manual','photo'].includes(body.method),'Invalid scan method.');
+            const update=await db.prepare('UPDATE rotation_rechecks SET verified_at=?,verified_by=?,method=? WHERE id=? AND status IS NULL').bind(now(),user.id,body.method,recheck.id).run();
+            must(update.rowCount>0,'This rotation recheck has already been saved.',409);
+            return answer({verified:true});
+        }
+        must(recheck.verified_at&&recheck.verified_by===user.id,'Scan the product yourself before saving this recheck.');
+        must(['okay','rotation_issue'].includes(body.status),'Choose Okay now or Still a rotation issue.');
+        must(body.quantity===undefined||body.quantity===0,'Rotation rechecks do not take a quantity.');
+        const checkedAt=now(),due=nextDate(today());
+        const saved=await db.batch([
+            db.prepare('UPDATE rotation_rechecks SET status=?,checked_at=?,checked_by=? WHERE id=? AND status IS NULL AND verified_by=?').bind(body.status,checkedAt,user.id,recheck.id,user.id),
+            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT origin_line_id || ':recheck:' || ?,origin_line_id,?,? FROM rotation_rechecks WHERE id=? AND status='rotation_issue' AND checked_at=? AND checked_by=? ON CONFLICT DO NOTHING`).bind(due,due,checkedAt,recheck.id,checkedAt,user.id)
+        ]);
+        must(saved[0].rowCount>0,'This recheck was saved or rescanned by another person. Refresh and try again.',409);
+        return answer({ok:true,nextDue:body.status==='rotation_issue'?due:null});
     }
     if (req.method === 'GET' && path.startsWith('report/')) {
         const id = decodeURIComponent(path.slice(7));
@@ -173,7 +229,11 @@ async function run(req, db, user) {
         must(round, 'Check not found.', 404);
         const count = await db.prepare('SELECT COUNT(*) AS total,SUM(CASE WHEN status IS NULL OR verified_at IS NULL THEN 1 ELSE 0 END) AS remaining FROM lines WHERE round_id=?').bind(round.id).first();
         must(count && count.total > 0 && Number(count.remaining) === 0, 'Every line must be verified and recorded before finishing.');
-        await db.prepare('UPDATE rounds SET finished=COALESCE(finished,?) WHERE id=? AND NOT EXISTS (SELECT 1 FROM lines WHERE round_id=rounds.id AND (status IS NULL OR verified_at IS NULL))').bind(now(), round.id).run();
+        await db.batch([
+            db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(round.id),
+            db.prepare('UPDATE rounds SET finished=COALESCE(finished,?) WHERE id=? AND NOT EXISTS (SELECT 1 FROM lines WHERE round_id=rounds.id AND (status IS NULL OR verified_at IS NULL))').bind(now(),round.id),
+            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT l.id || ':recheck:' || to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),l.id,to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),r.finished FROM lines l JOIN rounds r ON r.id=l.round_id WHERE r.id=? AND r.mode='daily' AND r.finished IS NOT NULL AND l.status='rotation_issue' ON CONFLICT DO NOTHING`).bind(round.id)
+        ]);
         return answer({ ok: true });
     }
     throw new Problem(404, 'This action was not found.');

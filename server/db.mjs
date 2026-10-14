@@ -7,7 +7,7 @@ export async function openDatabase(connection,options={}){
  try{
   await client.query('BEGIN');await client.query("SELECT pg_advisory_xact_lock(6030160)");
   await client.query('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)');
-  const migrations=[{version:1,file:'./schema.sql'},{version:2,file:'./migrations/002_risk_and_rotation.sql'}];
+  const migrations=[{version:1,file:'./schema.sql'},{version:2,file:'./migrations/002_risk_and_rotation.sql'},{version:3,file:'./migrations/003_rotation_rechecks.sql'}];
   for(const migration of migrations){
    const applied=await client.query('SELECT version FROM schema_migrations WHERE version=$1',[migration.version]);
    if(applied.rows.length)continue;
