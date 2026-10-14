@@ -35,3 +35,30 @@
 }
 
 .report-action-menu .report-delete{border-top:1px solid #e2e6de;border-radius:0 0 5px 5px;margin-top:4px;color:#9a5547}.report-action-menu .report-delete:hover{background:#fff0e9}.report-actions>summary[aria-disabled=true]{opacity:.45;cursor:not-allowed}.report-notice{padding:13px 16px;background:#e9f2ef;color:#4d796a;font-size:12px;border-radius:7px;margin-bottom:18px}@media print{.report-notice{display:none!important}}
+
+/* Keep the page within the viewport while retaining contained table scrolling. */
+@media screen{
+ html,body,#root{width:100%;max-width:100%;min-width:0;overflow-x:hidden;overflow-x:clip;overscroll-behavior-x:none;touch-action:pan-x pan-y}
+ .app-shell{width:100%;min-width:0}
+ .content,.panel,.daily-start,.catalogue-layout,.admin-layout{min-width:0}
+ .table-scroll{max-width:100%;overscroll-behavior-x:contain;touch-action:pan-x pan-y}
+}
+@media screen and (max-width:700px){
+ .sidebar{max-width:100%;min-width:0;overflow:visible;padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+ .sidebar .wordmark{display:none}
+ .sidebar nav{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);min-width:0;gap:0}
+ .sidebar nav button{min-width:0;width:100%;padding:10px 4px}
+ .sidebar-bottom{flex-shrink:0;padding:0;margin:0;width:36px}
+ .user-block .icon-btn{width:36px}
+ .content{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+ .login-intro,.login-form-wrap{min-width:0}
+ .page-heading,.report-heading,.check-card-top,.product-identifiers,.member-info,.report-meta,.check-card h2,.verify-box>div{min-width:0;overflow-wrap:anywhere}
+ .check-card-top{flex-wrap:wrap}
+ .area-badge{white-space:normal;overflow-wrap:anywhere}
+ .button{max-width:100%;min-width:0;white-space:normal;text-align:center}
+ .button svg{flex-shrink:0}
+ .button-row{min-width:0}
+ .report-heading{gap:10px;align-items:center}
+ .report-filters label{flex:1 1 100%;min-width:0}
+ input,select,textarea{font-size:16px!important;max-width:100%}
+}

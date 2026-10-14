@@ -91,6 +91,10 @@ Restart the backend and open that HTTPS address in Safari or Chrome on your phon
 
 The scanner uses the rear camera, with a bundled ZXing decoder for EAN-13, plus photo scanning and manual entry fallbacks. It searches horizontal, vertical, upside-down and diagonal barcode orientations using additional rotated decoding passes. The camera scans diagonals over successive frames to limit phone CPU use; photo scanning tries all angles. Keep the complete barcode and its blank side margins visible, in focus and sufficiently lit. In-plane rotation support does not compensate for a hidden barcode or an extreme perspective angle. Camera frames stay on the device; only the decoded barcode and verification method reach the server. Torch controls appear only when offered by the camera. Real-device camera accuracy still needs a phone test on your HTTPS hostname.
 
+## Mobile layout
+
+The mobile navigation fits all account tabs within the screen. The page is constrained to the viewport and horizontal overscroll is disabled. Wide tables retain their own contained scroll area so all columns remain available without moving the page sideways. Mobile form controls use 16px text to avoid input-focus zoom. Viewport settings request a fixed 1× scale and touch gestures allow single-finger scrolling without pinch zoom. Browsers can override viewport zoom restrictions, particularly iOS Safari and accessibility settings. These screen-only styles do not affect the printed report layout.
+
 ## Catalogue and risk-based selection
 
 Use Product catalogue to scan and add products. Keep area spelling consistent (the form suggests existing areas). EAN-13 check digits are validated. PLUs are exactly six digits, including any leading zeros.
