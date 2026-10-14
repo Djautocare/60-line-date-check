@@ -4,14 +4,14 @@ A mobile-friendly website with username/password staff accounts, an admin portal
 
 ## Workflow
 
-1. Admin scans each catalogue product and enters its name, **6-digit PLU** and **area**. There is no 60-product catalogue limit.
-2. Admin sets how many products to select from each area. The total must be **60**, and each area must have enough distinct products.
+1. Admin scans each catalogue product and enters its name, **6-digit PLU**, **area** and **risk level**. There is no 60-product catalogue limit.
+2. Admin marks products **High risk**, **Normal** or **Low risk**. The daily list picks **60 unique products from the whole catalogue**, using risk to adjust selection odds. There are no fixed area quotas.
 3. The first daily check generates one random selection for that **Europe/London calendar date**. All staff see the same list. It is saved and reused, including after server restarts. Products do not repeat within a selection, but may appear again on a later day.
 4. Staff start or resume their own daily check and verify each expected EAN-13 using the camera. A mismatched barcode is rejected by the backend.
-5. They select **Okay**, **Out of date**, or **Not stickered**. Issues require a whole quantity from 1 to 9,999. Okay records zero issue items.
-6. A check can only be finished after every line is verified and recorded. Reports include PLU, area, result, issue quantity, verification method and timestamps, with CSV export.
+5. They select **Okay**, **Out of date**, or **Not stickered**, or **Rotation issue**. Out of date and Not stickered require a whole quantity from 1 to 9,999. Rotation issue is a flagged line without a quantity; report totals count flagged lines. Okay records zero issue items.
+6. A check can only be finished after every line is verified and recorded. Reports include PLU, area, risk at selection, result, issue quantity, verification method and timestamps, with CSV export.
 
-The daily list is generated on demand when the first person starts, rather than by a midnight scheduled task. Later changes to products or quotas do not replace an already generated daily list. Each staff member has a separate check record. Catalogue details are copied into check lines so reports retain their original product information.
+The daily list is generated on demand when the first person starts, rather than by a midnight scheduled task. Later changes to products or risk levels do not replace an already generated daily list. Each staff member has a separate check record. Catalogue details are copied into check lines so reports retain their original product information.
 
 ## Windows setup
 
@@ -91,19 +91,23 @@ Restart the backend and open that HTTPS address in Safari or Chrome on your phon
 
 The scanner uses the rear camera, with a bundled ZXing decoder for EAN-13, plus photo scanning and manual entry fallbacks. It searches horizontal, vertical, upside-down and diagonal barcode orientations using additional rotated decoding passes. The camera scans diagonals over successive frames to limit phone CPU use; photo scanning tries all angles. Keep the complete barcode and its blank side margins visible, in focus and sufficiently lit. In-plane rotation support does not compensate for a hidden barcode or an extreme perspective angle. Camera frames stay on the device; only the decoded barcode and verification method reach the server. Torch controls appear only when offered by the camera. Real-device camera accuracy still needs a phone test on your HTTPS hostname.
 
-## Catalogue and daily split
+## Catalogue and risk-based selection
 
 Use Product catalogue to scan and add products. Keep area spelling consistent (the form suggests existing areas). EAN-13 check digits are validated. PLUs are exactly six digits, including any leading zeros.
 
 CSV imports use these columns:
 
 ```csv
-name,ean,plu,area
+name,ean,plu,area,risk
 ```
 
-Use text formatting for numeric-looking identifiers to preserve leading zeros. Importing an existing EAN updates that product's name, PLU and area. The app accepts up to 2,000 rows in each import.
+Use text formatting for numeric-looking identifiers to preserve leading zeros. Importing an existing EAN updates that product's name, PLU and area. The optional `risk` column accepts `high`, `normal` or `low`; omitting it preserves existing risk levels and defaults new products to Normal. The app accepts up to 2,000 rows in each import.
 
-After adding products, open **Daily area split** and allocate 60 lines. An admin can run a clearly labelled **practice check** with a smaller catalogue to test the workflow; it never counts as the daily 60-line check.
+**Edit by scanning** is available to administrators in Product catalogue, Daily selection and the Admin portal. Rescanning a saved EAN opens its current record, where the risk level and product details can be edited. Unknown barcodes must first be added to the catalogue. Staff cannot change product risk levels.
+
+The selection uses weights High = 3, Normal = 1, Low = 0.5 with weighted random sampling without replacement. These are relative selection weights, not guaranteed check frequencies: actual inclusion chances depend on the catalogue size and risk mix. Every product remains eligible and may reappear on consecutive days. With exactly 60 catalogue entries, every entry is included; risk affects the selection only when there are more than 60. The generated selection remains fixed for the day, including after risk edits.
+
+Add at least 60 products to start a daily check. An admin can run a clearly labelled **practice check** with a smaller catalogue to test the workflow; it never counts as the daily 60-line check.
 
 ## Accounts and access
 
@@ -122,3 +126,7 @@ npm run build
 ```
 
 Automated workflow tests use a temporary PostgreSQL-compatible test database and do not require your production database. Back up `datecheck60` with pgAdmin or `pg_dump`; do not treat GitHub as a database backup. To install updates, stop the backend, download the updated source in the same directory, run `npm install` and `npm run build`, and launch the backend again. Your `.env` and PostgreSQL records stay separate from source.
+
+## Updating an existing installation
+
+This update adds risk levels and the Rotation issue result through database migration 2. Existing products and historical check lines start at Normal risk. Existing daily selections, catalogue entries, accounts and reports are preserved. Migration 1 is unchanged. Stop the DateCheck backend, copy the updated repository files into the same folder while keeping `.env`, run `npm run build`, and relaunch the backend. The migration is applied automatically at startup. Existing selections are not regenerated; the new weighting applies to the next day whose list has not yet been generated.

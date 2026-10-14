@@ -14,14 +14,20 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('members',undefined,staffCookie)).status,403);
  assert.equal((await call('members/create',{username:'rogue',name:'Rogue',password:'staff-test-password-123',role:'admin'},staffCookie)).status,403);
  assert.equal((await call('rounds/start',{mode:'daily'},staffCookie)).status,400);
- const products=Array.from({length:90},(_,i)=>({name:'Product '+i,ean:fullEAN(408860100000+i),plu:String(100000+i),section:i<50?'Bread chiller':'Produce chiller'}));
+ const products=Array.from({length:90},(_,i)=>({name:'Product '+i,ean:fullEAN(408860100000+i),plu:String(100000+i),section:i<50?'Bread chiller':'Produce chiller',risk:i<30?'high':i<60?'normal':'low'}));
  assert.equal((await call('products',{items:products})).status,200);
  assert.equal((await call('products',{name:'Invalid',ean:'4088600303391',plu:'123456',section:'Bread chiller'})).status,400);
  assert.equal((await call('products',{name:'Invalid PLU',ean:'4088600303390',plu:'12345',section:'Bread chiller'})).status,400);
- assert.equal((await call('quotas',{quotas:{'Bread chiller':50,'Produce chiller':11}})).status,400);
- assert.equal((await call('quotas',{quotas:{'Bread chiller':19,'Produce chiller':41}})).status,400);
- assert.equal((await call('quotas',{quotas:{'Bread chiller':35,'Produce chiller':25}})).status,200);
- r=await call('rounds/start',{mode:'daily',store:'Test store'},staffCookie);assert.equal(r.status,200);const round=r.data.round;const lines=r.data.lines;assert.equal(lines.length,60);assert.equal(new Set(lines.map(l=>l.ean)).size,60);assert.equal(lines.filter(l=>l.section==='Bread chiller').length,35);assert.equal(lines.filter(l=>l.section==='Produce chiller').length,25);
+ assert.equal((await call('state')).data.products.filter(p=>p.risk==='high').length,30);
+ assert.equal((await call('products',{...products[0],risk:'invalid'})).status,400);
+ assert.equal((await call('products/lookup',{ean:products[0].ean},staffCookie)).status,403);
+ assert.equal((await call('products',{...products[0],risk:'low'},staffCookie)).status,403);
+ r=await call('products/lookup',{ean:products[0].ean});assert.equal(r.status,200);assert.equal(r.data.product.risk,'high');
+ assert.equal((await call('products/lookup',{ean:'4088600303390'})).status,404);
+ // A legacy import without a risk field preserves the existing risk.
+ const {risk,...legacyProduct}=products[0];assert.equal((await call('products',legacyProduct)).status,200);
+ assert.equal((await call('products/lookup',{ean:products[0].ean})).data.product.risk,'high');
+ r=await call('rounds/start',{mode:'daily',store:'Test store'},staffCookie);assert.equal(r.status,200);const round=r.data.round;const lines=r.data.lines;assert.equal(lines.length,60);assert.equal(new Set(lines.map(l=>l.ean)).size,60);assert.ok(lines.every(l=>['high','normal','low'].includes(l.risk)));assert.ok(lines.every(l=>products.some(p=>p.ean===l.ean)));
  const other=await call('rounds/start',{mode:'daily'});assert.equal(other.status,200);assert.deepEqual(other.data.lines.map(l=>l.ean),lines.map(l=>l.ean));
  assert.equal((await call('report/'+encodeURIComponent(other.data.round.id),undefined,staffCookie)).status,404);
  assert.equal((await call('lines/save',{id:lines[0].id,status:'okay',quantity:0},staffCookie)).status,400);
@@ -31,22 +37,23 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('lines/verify',{id:other.data.lines[0].id,ean:other.data.lines[0].ean,method:'camera'},staffCookie)).status,404);
  for(let i=0;i<lines.length;i++){
   const l=lines[i];assert.equal((await call('lines/verify',{id:l.id,ean:l.ean,method:i?'camera':'manual'},staffCookie)).status,200);
+  if(i===2)assert.equal((await call('lines/save',{id:l.id,status:'rotation_issue',quantity:1},staffCookie)).status,400);
   if(i===0){assert.equal((await call('lines/save',{id:l.id,status:'out_of_date',quantity:0},staffCookie)).status,400);assert.equal((await call('lines/save',{id:l.id,status:'out_of_date',quantity:1.5},staffCookie)).status,400);}
-  assert.equal((await call('lines/save',{id:l.id,status:i===0?'out_of_date':i===1?'not_stickered':'okay',quantity:i===0?3:i===1?2:0},staffCookie)).status,200);
+  assert.equal((await call('lines/save',{id:l.id,status:i===0?'out_of_date':i===1?'not_stickered':i===2?'rotation_issue':'okay',quantity:i===0?3:i===1?2:0},staffCookie)).status,200);
  }
  assert.equal((await call('rounds/finish',{id:round.id},staffCookie)).status,200);
  assert.equal((await call('lines/save',{id:lines[0].id,status:'okay',quantity:0},staffCookie)).status,400);
- r=await call('reports',undefined,staffCookie);assert.equal(r.data.reports.length,1);assert.equal(Number(r.data.reports[0].out_of_date),3);assert.equal(Number(r.data.reports[0].not_stickered),2);
+ r=await call('reports',undefined,staffCookie);assert.equal(r.data.reports.length,1);assert.equal(Number(r.data.reports[0].out_of_date),3);assert.equal(Number(r.data.reports[0].not_stickered),2);assert.equal(Number(r.data.reports[0].rotation_issue),1);
  // Saved catalogue snapshots remain stable after edits and even removal.
- const catalogue=await call('state');const selected=catalogue.data.products.find(p=>p.ean===lines[0].ean);assert.equal((await call('products',{...selected,name:'Renamed later'})).status,200);
+ const catalogue=await call('state');const selected=catalogue.data.products.find(p=>p.ean===lines[0].ean);assert.equal((await call('products',{...selected,name:'Renamed later',risk:'low'})).status,200);
+ assert.equal((await call('products/lookup',{ean:selected.ean})).data.product.risk,'low');
  assert.equal((await call('products/delete',{id:selected.id})).status,200);
- r=await call('rounds/start',{mode:'daily'},staffCookie);assert.equal(r.status,200);assert.equal(r.data.lines[0].name,lines[0].name);assert.equal(r.data.lines[0].ean,lines[0].ean);assert.ok(r.data.round.finished);
- // A later day gets a fresh persisted selection, respecting changed quotas.
+ r=await call('rounds/start',{mode:'daily'},staffCookie);assert.equal(r.status,200);assert.equal(r.data.lines[0].name,lines[0].name);assert.equal(r.data.lines[0].ean,lines[0].ean);assert.ok(r.data.round.finished);assert.equal(r.data.lines[0].risk,lines[0].risk);
+ // A later day gets a fresh persisted selection, using the current catalogue and risk levels.
  await db.prepare('UPDATE selections SET date=?').bind('2000-01-01').run();
- assert.equal((await call('quotas',{quotas:{'Bread chiller':30,'Produce chiller':30}})).status,200);
  r=await call('members/create',{username:'staff2',name:'Staff Two',password:'other-test-password-123',role:'staff'});assert.equal(r.status,200);
  const login2=await call('login',{username:'staff2',password:'other-test-password-123'},'');const cookie2=login2.cookie;
- r=await call('rounds/start',{mode:'daily'},cookie2);assert.equal(r.status,200);assert.equal(r.data.lines.length,60);assert.equal(r.data.lines.filter(l=>l.section==='Bread chiller').length,30);
+ r=await call('rounds/start',{mode:'daily'},cookie2);assert.equal(r.status,200);assert.equal(r.data.lines.length,60);assert.equal(new Set(r.data.lines.map(l=>l.ean)).size,60);
  // Revoking access and resetting a password invalidates usable sessions.
  const member2=(await call('members')).data.members.find(m=>m.username==='staff2');
  assert.equal((await call('members',{id:member2.id,role:'staff',active:0})).status,200);assert.equal((await call('me',undefined,cookie2)).status,401);
