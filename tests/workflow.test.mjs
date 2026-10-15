@@ -29,13 +29,12 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('products/lookup',{ean:products[0].ean})).data.product.risk,'high');
  r=await call('rounds/start',{mode:'daily',store:'Test store'},staffCookie);assert.equal(r.status,200);const round=r.data.round;const lines=r.data.lines;assert.equal(lines.length,60);assert.equal(new Set(lines.map(l=>l.ean)).size,60);assert.ok(lines.every(l=>['high','normal','low'].includes(l.risk)));assert.ok(lines.every(l=>products.some(p=>p.ean===l.ean)));
  const other=await call('rounds/start',{mode:'daily'});assert.equal(other.status,200);assert.deepEqual(other.data.lines.map(l=>l.ean),lines.map(l=>l.ean));
- assert.equal((await call('report/'+encodeURIComponent(other.data.round.id),undefined,staffCookie)).status,404);
+ assert.equal((await call('report/'+encodeURIComponent(other.data.round.id),undefined,staffCookie)).status,200);
  assert.equal((await call('lines/save',{id:lines[0].id,status:'okay',quantity:0},staffCookie)).status,400);
  const unknown=await call('lines/verify',{id:lines[0].id,ean:'4088600303390',method:'camera'},staffCookie);assert.equal(unknown.status,200);assert.equal(unknown.data.needsConfirmation,true);assert.equal(unknown.data.verified,false);
  assert.equal((await call('lines/verify',{id:lines[0].id,ean:lines[0].ean,method:'camera'},staffCookie,'https://evil.example')).status,403);
  assert.equal((await call('rounds/finish',{id:round.id},staffCookie)).status,400);
- assert.equal((await call('lines/save',{id:other.data.lines[0].id,status:'off_sale',quantity:0},staffCookie)).status,404);
- assert.equal((await call('lines/verify',{id:other.data.lines[0].id,ean:other.data.lines[0].ean,method:'camera'},staffCookie)).status,404);
+ assert.equal(other.data.round.id,round.id); // One shared daily check per store.
  for(let i=0;i<lines.length;i++){
   const l=lines[i];
   if(i===3){
@@ -63,7 +62,7 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('products/lookup',{ean:selected.ean})).data.product.risk,'low');
  assert.equal((await call('products/delete',{id:selected.id})).status,200);
  r=await call('rounds/start',{mode:'daily'},staffCookie);assert.equal(r.status,200);assert.equal(r.data.lines[0].name,lines[0].name);assert.equal(r.data.lines[0].ean,lines[0].ean);assert.ok(r.data.round.finished);assert.equal(r.data.lines[0].risk,lines[0].risk);
- // A later day gets a fresh persisted selection, using the current catalogue and risk levels.
+ // A new colleague joins the same completed daily check even if the selection row changes.
  await db.prepare('UPDATE selections SET date=?').bind('2000-01-01').run();
  r=await call('members/create',{username:'staff2',name:'Staff Two',password:'other-test-password-123',role:'staff'});assert.equal(r.status,200);
  const login2=await call('login',{username:'staff2',password:'other-test-password-123'},'');const cookie2=login2.cookie;
@@ -74,7 +73,7 @@ test('username login, staff access, daily selection, verification, completion an
  assert.equal((await call('members',{id:member2.id,role:'staff',active:1})).status,200);
  assert.equal((await call('members/password',{id:member2.id,password:'new-staff-password-123'})).status,200);assert.equal((await call('me',undefined,cookie2)).status,401);
  r=await call('login',{username:'staff2',password:'new-staff-password-123'},'');assert.equal(r.status,200);
- const owner=(await call('members')).data.members.find(m=>m.username==='owner');assert.equal((await call('members',{id:owner.id,role:'staff',active:0})).status,400);
+ const owner=(await call('members')).data.members.find(m=>m.username==='owner');assert.equal((await call('members',{id:owner.id,role:'staff',active:0})).status,403);
  assert.equal((await call('logout',{},staffCookie)).status,200);assert.equal((await call('me',undefined,staffCookie)).status,401);
 });
 test('EAN-13 check digit validates the supplied Aldi example',()=>{assert.equal(validEAN13('4088600303390'),true);assert.equal(validEAN13('4088600303391'),false);assert.equal(validEAN13('408860030339'),false);});

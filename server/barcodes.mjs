@@ -32,7 +32,7 @@ export async function observeBarcode(c,line,round,user){
  if(!line.barcode_candidate_id||round.mode!=='daily')return null;
  const candidate=await one(c,'SELECT * FROM barcode_candidates WHERE id=$1',[line.barcode_candidate_id]);
  if(!candidate||candidate.status!=='pending')return null;
- await c.query(`INSERT INTO barcode_observations(candidate_id,round_id,observed_by,observed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[candidate.id,round.id,user.id,now()]);
+ await c.query(`INSERT INTO barcode_observations(candidate_id,round_id,observed_by,observed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[candidate.id,round.id,line.recorded_by||user.id,now()]);
  const count=Number((await one(c,'SELECT COUNT(*) AS n FROM barcode_observations WHERE candidate_id=$1',[candidate.id])).n);
  const competing=await one(c,`SELECT id FROM barcode_candidates WHERE ean=$1 AND product_id<>$2 AND status='pending' LIMIT 1`,[candidate.ean,candidate.product_id]);
  let confirmed=false;

@@ -24,7 +24,7 @@ export async function createApp({db,origin,secureCookie=false}){
    const key=`${ip}:${username}`;const t=Date.now();const previous=failures.get(key);
    if(previous&&previous.until>t&&previous.count>=10)return response({error:'Too many login attempts. Try again in 15 minutes.'},429,{'Retry-After':'900'});
    if(failures.size>10000){for(const [k,v] of failures)if(v.until<t)failures.delete(k);if(failures.size>10000)return response({error:'Please try again shortly.'},429);}
-   const member=await db.prepare('SELECT * FROM members WHERE username=?').bind(username).first();
+   const member=await db.prepare("SELECT m.*,m.id=(SELECT value FROM settings WHERE key='owner') AS is_owner,t.number AS store_number FROM members m LEFT JOIN stores t ON t.id=m.store_id WHERE m.username=?").bind(username).first();
    const valid=await verifyPassword(password,member?.password_hash||dummy);
    if(!valid||!member?.active){const n=previous&&previous.until>t?previous.count+1:1;failures.set(key,{count:n,until:t+15*60*1000});return response({error:'Username or password is incorrect.'},401);}
    failures.delete(key);const token=newToken();await db.batch([db.prepare('DELETE FROM sessions WHERE expires<?').bind(t),db.prepare('INSERT INTO sessions(token_hash,user_id,expires) VALUES (?,?,?)').bind(tokenHash(token),member.id,t+8*60*60*1000)]);

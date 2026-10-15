@@ -15,7 +15,7 @@ async function fixture(){
  const round=async(id,user,date,mode='daily')=>db.prepare('INSERT INTO rounds(id,user_id,date,mode,started) VALUES(?,?,?,?,?)').bind(id,user.id,date,mode,date+'T12:00:00Z').run();
  return {db,call,round};
 }
-test('report date and staff filters reach older pages and enforce staff ownership',async()=>{
+test('report date and staff filters reach older pages and share store daily reports',async()=>{
  const {db,call,round}=await fixture();try{
   for(let i=0;i<125;i++)await round('old'+i,admin,new Date(Date.UTC(2026,0,1+i)).toISOString().slice(0,10));
   await round('date-a',admin,'2026-10-13');await round('date-b',staff,'2026-10-13');await round('date-c',staff,'2026-10-14');
@@ -24,7 +24,7 @@ test('report date and staff filters reach older pages and enforce staff ownershi
   r=await call('reports?from=2026-10-13&to=2026-10-13');assert.equal(r.data.total,2);assert.ok(r.data.reports.every(x=>x.date==='2026-10-13'));
   r=await call('reports?from=2026-10-13&to=2026-10-14&checkedBy=staff');assert.equal(r.data.total,2);assert.ok(r.data.reports.every(x=>x.user_id==='staff'));
   r=await call('reports?from=2026-10-14&to=2026-10-14&checkedBy=admin');assert.equal(r.data.total,0);assert.equal(r.data.checkers.length,2);
-  r=await call('reports',undefined,staff);assert.equal(r.data.total,2);assert.deepEqual(r.data.checkers.map(x=>x.id),['staff']);
+  r=await call('reports',undefined,staff);assert.equal(r.data.total,128);assert.deepEqual(r.data.checkers.map(x=>x.id),['staff']);
   assert.equal((await call('reports?checkedBy=admin',undefined,staff)).status,403);
   assert.equal((await call('reports?from=2026-02-29')).status,400);
   assert.equal((await call('reports?from=2026-10-14&to=2026-10-13')).status,400);

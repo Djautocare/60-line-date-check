@@ -15,7 +15,7 @@ export async function bootstrapAdmin(db,config){
 export async function authenticate(req,db){
  const token=(req.headers.get('cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('datecheck_session='))?.slice(18);
  if(!token||!/^\w{64}$/.test(token))return null;
- return db.prepare('SELECT m.* FROM sessions s JOIN members m ON m.id=s.user_id WHERE s.token_hash=? AND s.expires>? AND m.active=1').bind(tokenHash(token),Date.now()).first();
+ return db.prepare("SELECT m.*,m.id=(SELECT value FROM settings WHERE key='owner') AS is_owner,t.number AS store_number FROM sessions s JOIN members m ON m.id=s.user_id LEFT JOIN stores t ON t.id=m.store_id WHERE s.token_hash=? AND s.expires>? AND m.active=1").bind(tokenHash(token),Date.now()).first();
 }
 export function newToken(){return randomBytes(32).toString('hex');}
-export function publicMember(m){return {id:m.id,name:m.name,username:m.username,role:m.role,active:m.active};}
+export function publicMember(m){return {id:m.id,name:m.name,username:m.username,role:m.role,active:m.active,store_id:m.store_id||null,store_number:m.store_number||null,is_owner:!!m.is_owner};}
