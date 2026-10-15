@@ -1,3 +1,4 @@
+import {BarcodeProblem,barcodeTransaction,barcodeOwner,verifyBarcode,observeBarcode,barcodeAdmin,importCatalogue} from './barcodes.mjs';
 import { validEAN13, validOutcome } from './ean.mjs';
 import {validDate,nextDate} from '../shared/report-dates.mjs';
 import {selectProducts,validRisk,RISK_WEIGHTS}from './selection.mjs';
@@ -42,8 +43,9 @@ async function run(req, db, user) {
         const round = await db.prepare("SELECT * FROM rounds WHERE user_id=? AND date=? AND mode='daily' ORDER BY started DESC LIMIT 1").bind(user.id, today()).first();
         const lines = round ? await db.prepare('SELECT * FROM lines WHERE round_id=? ORDER BY position').bind(round.id).all() : { results: [] };
         const selected = await db.prepare('SELECT items FROM selections WHERE date=?').bind(today()).first();
-        return answer({ member: publicMember(member), date: today(), products: products.results, round, lines: lines.results, selection: selected ? JSON.parse(selected.items) : null, riskWeights:RISK_WEIGHTS });
+        return answer({ member: publicMember(member), date: today(), products: products.results.map(p=>({...p,ean:p.ean||''})), round, lines: lines.results, selection: selected ? JSON.parse(selected.items) : null, riskWeights:RISK_WEIGHTS });
     }
+    if((req.method==='GET'&&path==='barcode-reviews')||(req.method==='POST'&&['products/by-plu','barcodes/lookup','barcode-reviews/resolve','barcodes/assign'].includes(path)))return answer(await barcodeAdmin(path,body,new URL(req.url).searchParams,db,user));
     if (req.method === 'GET' && path === 'reports') {
         const params = new URL(req.url).searchParams;
         const from = params.get('from') || '', to = params.get('to') || '';
@@ -80,30 +82,45 @@ async function run(req, db, user) {
         return answer({rechecks:result.results,total:Number(count.total),upcoming:Number(upcoming.total),offset,limit,today:today()});
     }
     if(req.method==='POST'&&(path==='rotation-rechecks/verify'||path==='rotation-rechecks/save')){
-        const recheck=await db.prepare('SELECT q.*,l.ean,l.round_id FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=?').bind(String(body.id)).first();
+        const recheck=await db.prepare('SELECT q.*,l.ean,l.product_id,l.round_id FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=?').bind(String(body.id)).first();
         must(recheck,'Rotation recheck not found.',404);
         must(!recheck.status,'This rotation recheck has already been saved.',409);
         must(recheck.due_date<=today(),'This recheck is scheduled for a future date.');
         if(path==='rotation-rechecks/verify'){
-            must(validEAN13(String(body.ean||'')),'Enter a valid EAN-13 barcode.');
-            must(body.ean===recheck.ean,'Wrong product. Scan the barcode on the expected item.',409);
-            must(['camera','manual','photo'].includes(body.method),'Invalid scan method.');
-            const update=await db.prepare('UPDATE rotation_rechecks SET verified_at=?,verified_by=?,method=? WHERE id=? AND status IS NULL').bind(now(),user.id,body.method,recheck.id).run();
-            must(update.rowCount>0,'This rotation recheck has already been saved.',409);
-            return answer({verified:true});
+            const outcome=await barcodeTransaction(db,async c=>{
+                const current=(await c.query('SELECT * FROM rotation_rechecks WHERE id=$1 FOR UPDATE',[recheck.id])).rows[0];
+                must(current&&!current.status,'This recheck has already been saved.',409);
+                const result=await verifyBarcode(c,{productId:recheck.product_id,snapshotEan:recheck.ean,ean:String(body.ean||''),user,method:body.method,confirmUnknown:body.confirmUnknown===true});
+                if(result.verified)await c.query('UPDATE rotation_rechecks SET verified_at=$1,verified_by=$2,method=$3,scanned_ean=$4 WHERE id=$5',[now(),user.id,body.method,body.ean,recheck.id]);
+                else await c.query('UPDATE rotation_rechecks SET verified_at=NULL,verified_by=NULL,method=NULL,scanned_ean=NULL WHERE id=$1',[recheck.id]);
+                return result;
+            });
+            return answer(outcome,outcome.code==='wrong_product'?409:200);
         }
         must(['okay','rotation_issue','off_sale'].includes(body.status),'Choose Okay now, Still a rotation issue or Off sale.');
         const offSale=body.status==='off_sale';
         must(offSale||(recheck.verified_at&&recheck.verified_by===user.id),'Scan the product yourself before saving this recheck.');
         must(body.quantity===undefined||body.quantity===0,'Rotation rechecks do not take a quantity.');
         const checkedAt=now(),due=nextDate(today());
-        const saved=await db.batch([
-            db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(recheck.round_id),
-            db.prepare('UPDATE rotation_rechecks SET status=?,checked_at=?,checked_by=?,verified_at=CASE WHEN ? THEN NULL ELSE verified_at END,verified_by=CASE WHEN ? THEN NULL ELSE verified_by END,method=CASE WHEN ? THEN NULL ELSE method END WHERE id=? AND status IS NULL AND (verified_by=? OR ?)').bind(body.status,checkedAt,user.id,offSale,offSale,offSale,recheck.id,user.id,offSale),
-            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT origin_line_id || ':recheck:' || ?,origin_line_id,?,? FROM rotation_rechecks WHERE id=? AND status IN ('rotation_issue','off_sale') AND checked_at=? AND checked_by=? ON CONFLICT DO NOTHING`).bind(due,due,checkedAt,recheck.id,checkedAt,user.id)
-        ]);
-        must(saved[1].rowCount>0,'This recheck was saved or rescanned by another person. Refresh and try again.',409);
-        return answer({ok:true,nextDue:body.status==='okay'?null:due});
+        const outcome=await barcodeTransaction(db,async c=>{
+            await c.query('SELECT id FROM rounds WHERE id=$1 FOR UPDATE',[recheck.round_id]);
+            const current=(await c.query('SELECT q.*,l.product_id,l.ean,l.plu,l.name FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=$1 FOR UPDATE OF q',[recheck.id])).rows[0];
+            must(current&&!current.status,'This rotation recheck has already been saved.',409);
+            must(offSale||(current.verified_at&&current.verified_by===user.id),'Scan the product yourself before saving this recheck.');
+            if(!offSale){
+                const scanned=current.scanned_ean||current.ean,owner=await barcodeOwner(c,scanned);
+                const wrong=owner&&(current.product_id?owner.id!==current.product_id:owner.plu!==current.plu||owner.name!==current.name);
+                const candidate=(await c.query('SELECT status FROM barcode_candidates WHERE ean=$1 AND product_id=$2',[scanned,current.product_id])).rows[0];
+                if(wrong||(!owner&&candidate?.status==='denied')){
+                    await c.query('UPDATE rotation_rechecks SET verified_at=NULL,verified_by=NULL,method=NULL,scanned_ean=NULL WHERE id=$1',[current.id]);
+                    return {error:wrong?`Wrong product: ${owner.name} · PLU ${owner.plu}`:'This barcode link was denied. Scan another variant or ask an administrator.',code:wrong?'wrong_product':'review_denied',product:owner};
+                }
+            }
+            await c.query('UPDATE rotation_rechecks SET status=$1,checked_at=$2,checked_by=$3,verified_at=CASE WHEN $4 THEN NULL ELSE verified_at END,verified_by=CASE WHEN $4 THEN NULL ELSE verified_by END,method=CASE WHEN $4 THEN NULL ELSE method END,scanned_ean=CASE WHEN $4 THEN NULL ELSE scanned_ean END WHERE id=$5',[body.status,checkedAt,user.id,offSale,current.id]);
+            if(body.status!=='okay')await c.query('INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[current.origin_line_id+':recheck:'+due,current.origin_line_id,due,checkedAt]);
+            return {ok:true,nextDue:body.status==='okay'?null:due};
+        });
+        return answer(outcome,outcome.error?409:200);
     }
     if (req.method === 'GET' && path.startsWith('report/')) {
         const id = decodeURIComponent(path.slice(7));
@@ -165,27 +182,11 @@ async function run(req, db, user) {
     }
     if(req.method==='POST'&&path==='products/lookup'){
         admin();must(validEAN13(String(body.ean||'')),'Scan a valid EAN-13 barcode.');
-        const product=await db.prepare('SELECT * FROM products WHERE ean=?').bind(body.ean).first();
-        must(product,'This barcode is not in the catalogue. Add it as a new product first.',404);
+        const product=await barcodeTransaction(db,c=>barcodeOwner(c,body.ean));
+        must(product,'This barcode has no approved product. Use Barcode reviews to assign it.',404);
         return answer({product});
     }
-    if (req.method === 'POST' && path === 'products') {
-        admin();
-        const items = Array.isArray(body.items) ? body.items : [body];
-        must(items.length >= 1 && items.length <= 2000, 'Import between 1 and 2,000 products at a time.');
-        const clean = items.map((p) => ({ id: p.id || crypto.randomUUID(), name: String(p.name || '').trim(), ean: String(p.ean || '').trim(), plu: String(p.plu || '').trim(), section: String(p.section || '').trim(),risk:p.risk===undefined?null:String(p.risk) }));
-        for (const p of clean) {
-            must(p.name.length > 0 && p.name.length <= 160, 'Every product needs a name of up to 160 characters.');
-            must(/^\d{6}$/.test(p.plu), 'Every product needs a 6-digit PLU.');
-            must(p.section.length > 0, 'Every product needs an area.');
-            must(validEAN13(p.ean), `Invalid EAN-13: ${p.ean.slice(0, 30)}`);
-            must(p.section.length <= 80, 'Section names can be up to 80 characters.');
-            must(p.risk===null||validRisk(p.risk),'Choose High risk, Normal or Low risk.');
-        }
-        must(new Set(clean.map((p) => p.ean)).size === clean.length, 'Your import contains duplicate barcodes.');
-        await db.batch(clean.map((p) => body.id ? db.prepare('UPDATE products SET name=?,ean=?,plu=?,section=?,risk=COALESCE(?,risk) WHERE id=?').bind(p.name, p.ean, p.plu, p.section,p.risk,p.id) : db.prepare(`INSERT INTO products(id,name,ean,plu,section,risk) VALUES (?,?,?,?,?,COALESCE(?,'normal')) ON CONFLICT(ean) DO UPDATE SET name=excluded.name,plu=excluded.plu,section=excluded.section,risk=CASE WHEN ? THEN excluded.risk ELSE products.risk END`).bind(p.id, p.name, p.ean, p.plu, p.section,p.risk,p.risk!==null)));
-        return answer({ ok: true, count: clean.length });
-    }
+    if(req.method==='POST'&&path==='products'){admin();return answer(await importCatalogue(db,body,user));}
     if (req.method === 'POST' && path === 'products/delete') {
         admin();
         await db.prepare('DELETE FROM products WHERE id=?').bind(String(body.id)).run();
@@ -217,7 +218,7 @@ async function run(req, db, user) {
         must(store.length <= 100, 'Store name is too long.');
         await db.batch([
             db.prepare('INSERT OR IGNORE INTO rounds(id,user_id,date,mode,store,started) VALUES (?,?,?,?,?,?)').bind(id, user.id, today(), practice ? 'practice' : 'daily', store, now()),
-            ...chosen.map((p, index) => db.prepare('INSERT OR IGNORE INTO lines(id,round_id,name,ean,plu,section,position,risk) VALUES (?,?,?,?,?,?,?,?)').bind(`${id}:${index}`, id, p.name, p.ean, p.plu, p.section, index + 1,p.risk||'normal'))
+            ...chosen.map((p, index) => db.prepare('INSERT OR IGNORE INTO lines(id,round_id,name,ean,plu,section,position,risk,product_id) VALUES (?,?,?,?,?,?,?,?,(SELECT id FROM products WHERE id=?))').bind(`${id}:${index}`, id, p.name, p.ean||'', p.plu, p.section, index + 1,p.risk||'normal',p.id))
         ]);
         const round = await db.prepare('SELECT * FROM rounds WHERE id=?').bind(id).first();
         const lines = await db.prepare('SELECT * FROM lines WHERE round_id=? ORDER BY position').bind(id).all();
@@ -228,32 +229,54 @@ async function run(req, db, user) {
         must(line && line.user_id === user.id, 'Check line not found.', 404);
         must(!line.finished, 'This check has already been completed.');
         if (path === 'lines/verify') {
-            must(validEAN13(String(body.ean || '')), 'Enter a valid EAN-13 barcode.');
-            must(body.ean === line.ean, 'Wrong product. Scan the barcode on the expected item.', 409);
-            must(['camera', 'manual', 'photo'].includes(body.method), 'Invalid scan method.');
-            const updates = await db.batch([db.prepare(`SELECT id FROM rounds WHERE id=? FOR UPDATE`).bind(line.round_id),db.prepare(`UPDATE lines SET verified_at=?,method=?,status=CASE WHEN status='off_sale' THEN NULL ELSE status END,saved_at=CASE WHEN status='off_sale' THEN NULL ELSE saved_at END WHERE id=? AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)`).bind(now(), body.method, line.id)]);
-            must(updates[1].rowCount > 0, 'This check has already been completed.');
-            return answer({ verified: true });
+            const outcome=await barcodeTransaction(db,async c=>{
+                const current=(await c.query('SELECT l.*,r.mode,r.user_id,r.finished FROM lines l JOIN rounds r ON r.id=l.round_id WHERE l.id=$1 FOR UPDATE OF r,l',[line.id])).rows[0];
+                must(current&&current.user_id===user.id&&!current.finished,'This check has already been completed.');
+                const result=await verifyBarcode(c,{productId:current.product_id,snapshotEan:current.ean,ean:String(body.ean||''),user,method:body.method,confirmUnknown:body.confirmUnknown===true,practice:current.mode==='practice'});
+                if(result.verified)await c.query(`UPDATE lines SET verified_at=$1,method=$2,ean=$3,barcode_candidate_id=$4,status=CASE WHEN status='off_sale' THEN NULL ELSE status END,saved_at=CASE WHEN status='off_sale' THEN NULL ELSE saved_at END WHERE id=$5`,[now(),body.method,body.ean,result.candidateId,current.id]);
+                else await c.query(`UPDATE lines SET verified_at=NULL,method=NULL,barcode_candidate_id=NULL,status=CASE WHEN status='off_sale' THEN status ELSE NULL END,saved_at=CASE WHEN status='off_sale' THEN saved_at ELSE NULL END WHERE id=$1`,[current.id]);
+                return result;
+            });
+            return answer(outcome,outcome.code==='wrong_product'?409:200);
         }
         const offSale=body.status==='off_sale';
         must(offSale||line.verified_at, 'Verify the product barcode before saving a result.');
         must(validOutcome(body.status, body.quantity), ['rotation_issue','off_sale'].includes(body.status)?'Rotation issue and Off sale are recorded without a quantity.':'Out of date and Not stickered need a whole quantity from 1 to 9,999.');
-        const updates = await db.batch([db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(line.round_id),db.prepare('UPDATE lines SET status=?,quantity=?,saved_at=?,verified_at=CASE WHEN ? THEN NULL ELSE verified_at END,method=CASE WHEN ? THEN NULL ELSE method END WHERE id=? AND (? OR verified_at IS NOT NULL) AND EXISTS (SELECT 1 FROM rounds WHERE rounds.id=lines.round_id AND finished IS NULL)').bind(body.status, body.quantity, now(),offSale,offSale,line.id,offSale)]);
-        must(updates[1].rowCount > 0, 'This check has already been completed.');
-        return answer({ ok: true });
+        const saved=await barcodeTransaction(db,async c=>{
+            const current=(await c.query('SELECT l.*,r.user_id,r.finished,r.mode FROM lines l JOIN rounds r ON r.id=l.round_id WHERE l.id=$1 FOR UPDATE OF r,l',[line.id])).rows[0];
+            must(current&&current.user_id===user.id&&!current.finished,'This check has already been completed.');
+            must(offSale||current.verified_at,'Verify the product barcode before saving a result.');
+            if(!offSale){
+                const match=await verifyBarcode(c,{productId:current.product_id,snapshotEan:current.ean,ean:current.ean,user,method:current.method,confirmUnknown:true,practice:current.mode==='practice'});
+                if(!match.verified){await c.query('UPDATE lines SET verified_at=NULL,method=NULL,status=NULL,saved_at=NULL,barcode_candidate_id=NULL WHERE id=$1',[current.id]);return {error:match.error||match.message,code:match.code||'review_denied',product:match.product};}
+            }
+            await c.query('UPDATE lines SET status=$1,quantity=$2,saved_at=$3,verified_at=CASE WHEN $4 THEN NULL ELSE verified_at END,method=CASE WHEN $4 THEN NULL ELSE method END,barcode_candidate_id=CASE WHEN $4 THEN NULL ELSE barcode_candidate_id END WHERE id=$5',[body.status,body.quantity,now(),offSale,current.id]);
+            return {ok:true};
+        });
+        return answer(saved,saved.error?409:200);
     }
     if (req.method === 'POST' && path === 'rounds/finish') {
-        const round = await db.prepare('SELECT * FROM rounds WHERE id=? AND user_id=?').bind(String(body.id), user.id).first();
-        must(round, 'Check not found.', 404);
-        const count = await db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN status IS NULL OR (status<>'off_sale' AND verified_at IS NULL) THEN 1 ELSE 0 END) AS remaining FROM lines WHERE round_id=?`).bind(round.id).first();
-        must(count && count.total > 0 && Number(count.remaining) === 0, 'Every line must be scanned and recorded, or marked Off sale, before finishing.');
-        const finished=await db.batch([
-            db.prepare('SELECT id FROM rounds WHERE id=? FOR UPDATE').bind(round.id),
-            db.prepare(`UPDATE rounds SET finished=COALESCE(finished,?) WHERE id=? AND NOT EXISTS (SELECT 1 FROM lines WHERE round_id=rounds.id AND (status IS NULL OR (status<>'off_sale' AND verified_at IS NULL)))`).bind(now(),round.id),
-            db.prepare(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT l.id || ':recheck:' || to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),l.id,to_char(((r.finished::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),r.finished FROM lines l JOIN rounds r ON r.id=l.round_id WHERE r.id=? AND r.mode='daily' AND r.finished IS NOT NULL AND l.status='rotation_issue' ON CONFLICT DO NOTHING`).bind(round.id)
-        ]);
-        must(finished[1].rowCount>0,'Every line must be scanned and recorded, or marked Off sale, before finishing.');
-        return answer({ ok: true });
+        const outcome=await barcodeTransaction(db,async c=>{
+            const round=(await c.query('SELECT * FROM rounds WHERE id=$1 AND user_id=$2 FOR UPDATE',[String(body.id),user.id])).rows[0];
+            must(round,'Check not found.',404);
+            if(round.finished)return {ok:true,learning:[]};
+            const lines=(await c.query('SELECT * FROM lines WHERE round_id=$1 ORDER BY position',[round.id])).rows;
+            must(lines.length>0&&lines.every(l=>l.status&&(l.status==='off_sale'||l.verified_at)),'Every line must be scanned and recorded, or marked Off sale, before finishing.');
+            for(const line of lines.filter(l=>l.status!=='off_sale')){
+                const owner=await barcodeOwner(c,line.ean);
+                const wrong=owner&&(line.product_id?owner.id!==line.product_id:owner.plu!==line.plu||owner.name!==line.name);
+                const candidate=line.barcode_candidate_id?(await c.query('SELECT status FROM barcode_candidates WHERE id=$1',[line.barcode_candidate_id])).rows[0]:null;
+                if(wrong||(!owner&&candidate?.status==='denied')){
+                    await c.query('UPDATE lines SET verified_at=NULL,method=NULL,status=NULL,saved_at=NULL,barcode_candidate_id=NULL WHERE id=$1',[line.id]);
+                    return {error:wrong?`Wrong product: ${owner.name} · PLU ${owner.plu}`:'This barcode link was denied. Scan the correct pack or ask an administrator.',code:wrong?'wrong_product':'review_denied',product:owner,lineId:line.id};
+                }
+            }
+            const finished=new Date().toISOString();await c.query('UPDATE rounds SET finished=$1 WHERE id=$2',[finished,round.id]);
+            await c.query(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT l.id || ':recheck:' || to_char((($1::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),l.id,to_char((($1::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),$1 FROM lines l WHERE l.round_id=$2 AND $3='daily' AND l.status='rotation_issue' ON CONFLICT DO NOTHING`,[finished,round.id,round.mode]);
+            const learning=[];for(const line of lines.filter(l=>l.status!=='off_sale')){const result=await observeBarcode(c,line,round,user);if(result)learning.push(result);}
+            return {ok:true,learning};
+        });
+        return answer(outcome,outcome.error?409:200);
     }
     throw new Problem(404, 'This action was not found.');
 }
@@ -261,6 +284,7 @@ export async function handle(req, db, user) { try {
     return await run(req, db, user);
 }
 catch (e) {
+    if(e instanceof BarcodeProblem)return answer({error:e.message,...e.details},e.status);
     if (e instanceof Problem)
         return answer({ error: e.message }, e.status);
     if (e?.code === '23505') return answer({error:'That barcode or username already exists.'},400);

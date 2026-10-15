@@ -1,0 +1,11 @@
+ALTER TABLE products ALTER COLUMN ean DROP NOT NULL;
+CREATE TABLE product_barcodes(ean TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,confirmed_at TEXT NOT NULL,confirmed_by TEXT REFERENCES members(id) ON DELETE SET NULL,source TEXT NOT NULL);
+INSERT INTO product_barcodes(ean,product_id,confirmed_at,source) SELECT ean,id,CURRENT_TIMESTAMP::text,'existing' FROM products WHERE ean IS NOT NULL AND ean<>'';
+CREATE INDEX product_barcodes_product ON product_barcodes(product_id);
+CREATE TABLE barcode_candidates(id TEXT PRIMARY KEY,ean TEXT NOT NULL,product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN('pending','approved','denied')),requires_review INTEGER NOT NULL DEFAULT 0,created TEXT NOT NULL,updated TEXT NOT NULL,resolved_by TEXT REFERENCES members(id) ON DELETE SET NULL,UNIQUE(ean,product_id));
+CREATE INDEX barcode_candidates_queue ON barcode_candidates(status,ean);
+CREATE TABLE barcode_observations(candidate_id TEXT NOT NULL REFERENCES barcode_candidates(id) ON DELETE CASCADE,round_id TEXT NOT NULL,observed_by TEXT REFERENCES members(id) ON DELETE SET NULL,observed_at TEXT NOT NULL,PRIMARY KEY(candidate_id,round_id));
+ALTER TABLE lines ADD COLUMN product_id TEXT REFERENCES products(id) ON DELETE SET NULL;
+ALTER TABLE lines ADD COLUMN barcode_candidate_id TEXT REFERENCES barcode_candidates(id) ON DELETE SET NULL;
+UPDATE lines l SET product_id=p.id FROM products p WHERE l.ean=p.ean;
+ALTER TABLE rotation_rechecks ADD COLUMN scanned_ean TEXT;

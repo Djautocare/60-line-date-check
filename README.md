@@ -4,10 +4,10 @@ A mobile-friendly website with username/password staff accounts, an admin portal
 
 ## Workflow
 
-1. Admin scans each catalogue product and enters its name, **6-digit PLU**, **area** and **risk level**. There is no 60-product catalogue limit.
+1. Admin imports each area’s product names/descriptions, **6-digit PLUs**, **areas** and optional **risk levels**, with no EAN required. There is no 60-product catalogue limit.
 2. Admin marks products **High risk**, **Normal** or **Low risk**. The daily list picks **60 unique products from the whole catalogue**, using risk to adjust selection odds. There are no fixed area quotas.
 3. The first daily check generates one random selection for that **Europe/London calendar date**. All staff see the same list. It is saved and reused, including after server restarts. Products do not repeat within a selection, but may appear again on a later day.
-4. Staff start or resume their own daily check and verify each expected EAN-13 using the camera. A mismatched barcode is rejected by the backend.
+4. Staff start or resume their own daily check and verify each expected EAN-13 using the camera. Confirmed variants are accepted. Unknown EANs need a neutral physical-product confirmation; only a barcode confirmed for another product triggers a red three-second warning showing its name and PLU, then scanning resumes.
 5. They select **Okay**, **Out of date**, or **Not stickered**, or **Rotation issue**. Out of date and Not stickered require a whole quantity from 1 to 9,999. Rotation issue is a flagged line without a quantity; report totals count flagged lines. Okay records zero issue items.
 6. Before scanning, use **Off sale / Out of stock** if there is no stock to check. This saves the line without a barcode or quantity and moves to the next outstanding line. A check can be finished once every line is scanned and recorded or marked Off sale. Off-sale lines remain separate from Okay and quality issues, and count as recorded rather than inspected. Off sale affects that check only; it does not remove the product from the catalogue or future daily selections. Reports include PLU, area, risk at selection, result, issue quantity, verification method and timestamps, with CSV export.
 
@@ -97,17 +97,27 @@ The mobile navigation fits all account tabs within the screen. The page is const
 
 ## Catalogue and risk-based selection
 
-Use Product catalogue to scan and add products. Keep area spelling consistent (the form suggests existing areas). EAN-13 check digits are validated. PLUs are exactly six digits, including any leading zeros.
-
-CSV imports use these columns:
+Products can be created with only a description/name, six-digit PLU and area. EAN is optional. In **Product catalogue → Import an area without EANs**, download a blank template or choose a CSV. For tomorrow’s paper lists, upload each area’s photos in the chat to extract a CSV; the app does not perform image OCR. Review and edit each PLU, description and area in the preview, then press **Confirm import**. No data is imported merely by choosing a file.
 
 ```csv
-name,ean,plu,area,risk
+name,plu,area
 ```
 
-Use text formatting for numeric-looking identifiers to preserve leading zeros. Importing an existing EAN updates that product's name, PLU and area. The optional `risk` column accepts `high`, `normal` or `low`; omitting it preserves existing risk levels and defaults new products to Normal. The app accepts up to 2,000 rows in each import.
+`description` or `product name` can replace `name`. `section` can replace `area`, or set a default area before choosing the CSV. Optional columns are `ean` and `risk` (`high`, `normal`, `low`). Keep PLUs and barcodes as text to retain leading zeros. Imports update by PLU and keep approved EAN variants and risk when omitted. Duplicate PLUs in a file are rejected, as are ambiguous existing duplicate-PLU records; edit those individually. A conflicting EAN never moves to another PLU automatically. Imports are atomic and accept up to 2,000 rows within the request-size limit. A 900-line EAN-free import and a subsequent 60-product selection are covered by integration tests.
 
-**Edit by scanning** is available to administrators in Product catalogue, Daily selection and the Admin portal. Rescanning a saved EAN opens its current record, where the risk level and product details can be edited. Unknown barcodes must first be added to the catalogue. Staff cannot change product risk levels.
+### Barcode learning and mixed cases
+
+A product can have several approved EAN-13s. Existing catalogue EANs migrate as approved. For an unknown EAN, staff confirm the actual pack matches the selected PLU and description before recording dates. This is provisional verification, not an approved assignment. A candidate is created in **Barcode reviews** with the scanned EAN, proposed PLU/name, area and count of completed daily checks.
+
+The first EAN automatically confirms after four distinct **completed daily checks** with an inspected result for that candidate. Repeated scans, repeated saves or repeated Finish requests in one check count once. Practice, off-sale, unfinished checks and rotation rechecks do not add learning evidence. If the same EAN is pending against different products, an admin must resolve the conflict. Once a product has approved EANs, any new unknown variant always requires admin approval, even after four checks. An unknown barcode alone does not prove a mixed case.
+
+Approved variants of the expected product pass. A barcode approved for another product produces a red warning naming that product and its PLU for three seconds, clears the current verification and then resumes scanning. Unknown barcodes do not flash red. Denied proposals stay unverified and require admin help. The backend revalidates ownership when saving and finishing, so an intervening admin assignment cannot silently approve the wrong line. Manual and photo scans use the same rules.
+
+### Admin scan-to-review and assignment
+
+Open **Barcode reviews → Scan to review / assign**, or enter an EAN manually. Pending proposals for that EAN open immediately with their PLU, name and area, and **Confirm this variant / Deny link** buttons. Resolved reviews disappear immediately. Multiple proposed products remain separate choices; approving one EAN owner rejects its other pending proposals. Approved EANs cannot be silently reassigned to a different product.
+
+If the EAN is unassigned, enter a six-digit PLU, choose the displayed product/name/area, then **Confirm assignment**. Alternatively, scan (or enter) an already approved variant’s EAN to show its PLU and product name, then confirm linking the original EAN as another variant. An unassigned reference barcode requires using the PLU route instead. Only admins can approve, deny or assign links. **Edit by scanning** opens approved products for editing and routes unknown EANs to Barcode reviews. Additional approved variants are retained when catalogue details are edited.
 
 The selection uses weights High = 3, Normal = 1, Low = 0.5 with weighted random sampling without replacement. These are relative selection weights, not guaranteed check frequencies: actual inclusion chances depend on the catalogue size and risk mix. Every product remains eligible and may reappear on consecutive days. With exactly 60 catalogue entries, every entry is included; risk affects the selection only when there are more than 60. The generated selection remains fixed for the day, including after risk edits.
 
@@ -142,3 +152,9 @@ Automated workflow tests use a temporary PostgreSQL-compatible test database and
 ## Updating an existing installation
 
 Off sale uses migration 4 to extend the daily-check and recheck result options. The migration applies automatically at startup and preserves existing data. Risk levels and the Rotation issue result use database migration 2. Next-day rotation rechecks use migration 3, which also queues rotation issues from previously completed daily checks using the day after their completion in London time. Existing products and historical check lines start at Normal risk. Existing daily selections, catalogue entries, accounts and reports are preserved. Migration 1 is unchanged. Stop the DateCheck backend, copy the updated repository files into the same folder while keeping `.env`, run `npm run build`, and relaunch the backend. The migration is applied automatically at startup. Existing selections are not regenerated; the new weighting applies to the next day whose list has not yet been generated.
+
+## Barcode-learning upgrade (migration 5)
+
+Migration 5 runs automatically on backend startup. It permits blank catalogue EANs, seeds existing EANs as approved variants, adds pending proposals and completed-check evidence, and links check lines to catalogue IDs while preserving historical snapshots. There is no new PostgreSQL database to create. It does not rebuild today’s saved selection. Keep a normal database backup before upgrading.
+
+To activate on the Windows PC: stop the DateCheck backend, replace the source with the updated repository while keeping `.env`, run `npm install` and `npm run build` in `C:\datecheck60`, then launch the DateCheck backend task again and refresh the browser. The InventoryOS backend and Cloudflare tunnel configuration do not change. Check **Product catalogue** and **Barcode reviews** after restart. Real-camera behaviour still needs a phone test on the installed HTTPS site.

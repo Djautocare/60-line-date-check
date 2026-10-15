@@ -10,14 +10,14 @@ test('migration upgrades an existing catalogue and report without losing their r
   await engine.query("INSERT INTO lines(id,round_id,name,plu,ean,section,position,status,quantity) VALUES('old-line','old-round','Existing product','123456','4088600303390','Bread chiller',1,'not_stickered',2)");
   const pool={query:(s,a)=>engine.query(s,a),connect:async()=>({query:(s,a)=>engine.query(s,a),release(){}}),end:()=>engine.close()};
   await openDatabase('test',{pool});
-  const product=(await engine.query("SELECT * FROM products WHERE id='old-product'")).rows[0];assert.equal(product.risk,'normal');assert.equal(product.plu,'123456');
-  const line=(await engine.query("SELECT * FROM lines WHERE id='old-line'")).rows[0];assert.equal(line.status,'not_stickered');assert.equal(line.quantity,2);assert.equal(line.risk,'normal');
+  const product=(await engine.query("SELECT * FROM products WHERE id='old-product'")).rows[0];assert.equal(product.risk,'normal');assert.equal(product.plu,'123456');assert.equal((await engine.query("SELECT product_id FROM product_barcodes WHERE ean='4088600303390'")).rows[0].product_id,'old-product');
+  const line=(await engine.query("SELECT * FROM lines WHERE id='old-line'")).rows[0];assert.equal(line.status,'not_stickered');assert.equal(line.quantity,2);assert.equal(line.risk,'normal');assert.equal(line.product_id,'old-product');
   await engine.query("UPDATE lines SET status='rotation_issue',quantity=0 WHERE id='old-line'");
   await engine.query("UPDATE rounds SET finished='2026-10-13T23:30:00Z' WHERE id='old-round'");
-  await engine.query('DROP TABLE rotation_rechecks');await engine.query('DELETE FROM schema_migrations WHERE version>=3');
+  await engine.query('ALTER TABLE lines DROP COLUMN barcode_candidate_id');await engine.query('ALTER TABLE lines DROP COLUMN product_id');await engine.query('DROP TABLE barcode_observations');await engine.query('DROP TABLE barcode_candidates');await engine.query('DROP TABLE product_barcodes');await engine.query('DROP TABLE rotation_rechecks');await engine.query('DELETE FROM schema_migrations WHERE version>=3');
   await openDatabase('test',{pool});
   const recheck=(await engine.query('SELECT * FROM rotation_rechecks')).rows[0];assert.equal(recheck.origin_line_id,'old-line');assert.equal(recheck.due_date,'2026-10-15');
-  await openDatabase('test',{pool});assert.equal((await engine.query('SELECT COUNT(*) AS count FROM schema_migrations')).rows[0].count,4);
+  await openDatabase('test',{pool});assert.equal((await engine.query('SELECT COUNT(*) AS count FROM schema_migrations')).rows[0].count,5);
   assert.equal((await engine.query('SELECT COUNT(*) AS count FROM products')).rows[0].count,1);
  }finally{await engine.close();}
 });

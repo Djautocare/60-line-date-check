@@ -31,7 +31,7 @@ test('username login, staff access, daily selection, verification, completion an
  const other=await call('rounds/start',{mode:'daily'});assert.equal(other.status,200);assert.deepEqual(other.data.lines.map(l=>l.ean),lines.map(l=>l.ean));
  assert.equal((await call('report/'+encodeURIComponent(other.data.round.id),undefined,staffCookie)).status,404);
  assert.equal((await call('lines/save',{id:lines[0].id,status:'okay',quantity:0},staffCookie)).status,400);
- assert.equal((await call('lines/verify',{id:lines[0].id,ean:'4088600303390',method:'camera'},staffCookie)).status,409);
+ const unknown=await call('lines/verify',{id:lines[0].id,ean:'4088600303390',method:'camera'},staffCookie);assert.equal(unknown.status,200);assert.equal(unknown.data.needsConfirmation,true);assert.equal(unknown.data.verified,false);
  assert.equal((await call('lines/verify',{id:lines[0].id,ean:lines[0].ean,method:'camera'},staffCookie,'https://evil.example')).status,403);
  assert.equal((await call('rounds/finish',{id:round.id},staffCookie)).status,400);
  assert.equal((await call('lines/save',{id:other.data.lines[0].id,status:'off_sale',quantity:0},staffCookie)).status,404);
