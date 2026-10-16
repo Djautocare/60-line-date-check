@@ -2,7 +2,7 @@ import {storeAccess,roundAccess,storeAdmin} from './stores.mjs';
 import {BarcodeProblem,barcodeTransaction,barcodeOwner,verifyBarcode,observeBarcode,barcodeAdmin,importCatalogue} from './barcodes.mjs';
 import { validEAN13, validOutcome } from './ean.mjs';
 import {validDate,nextDate} from '../shared/report-dates.mjs';
-import {selectProducts,validRisk,RISK_WEIGHTS}from './selection.mjs';
+import {selectProducts,selectDailyProducts,validateAreaCounts,SelectionProblem,RISK_WEIGHTS}from './selection.mjs';
 import { publicMember } from './auth.mjs';
 class Problem extends Error {
     status;
@@ -47,14 +47,60 @@ async function run(req, db, user) {
         }
     }
     if((req.method==='GET'&&['stores','members'].includes(path))||(req.method==='POST'&&['stores/save','store-members/search','store-members/add','store-members/remove','members','members/create','members/password'].includes(path)))return answer(await storeAdmin(db,user,scope,req.method==='GET'&&path==='members'?'members/list':path,body));
-    if(!scope&&!user.is_owner){must(path==='state','This account has no assigned store. Ask a store admin to add your username.',403);return answer({member:publicMember(user),date:today(),store:null,products:[],round:null,lines:[],selection:null,sharedCheck:null,riskWeights:RISK_WEIGHTS});}
+    if(!scope&&!user.is_owner){must(path==='state','This account has no assigned store. Ask a store admin to add your username.',403);return answer({member:publicMember(user),date:today(),store:null,products:[],round:null,lines:[],selection:null,selectionCounts:null,sharedCheck:null,riskWeights:RISK_WEIGHTS});}
     if (req.method === 'GET' && path === 'state') {
         const products = await db.prepare('SELECT * FROM products ORDER BY section,name').all();
         const shared=scope?await db.prepare('SELECT * FROM store_daily_checks WHERE store_id=? AND date=?').bind(scope,today()).first():null;
         const round=shared?.round_id?await db.prepare('SELECT * FROM rounds WHERE id=?').bind(shared.round_id).first():null;
         const lines = round ? await db.prepare('SELECT l.*,m.name AS recorded_by_name FROM lines l LEFT JOIN members m ON m.id=l.recorded_by WHERE l.round_id=? ORDER BY l.position').bind(round.id).all() : { results: [] };
+        const policy=scope?await db.prepare('SELECT value FROM settings WHERE key=?').bind('area-counts:'+scope).first():null;
         const selected=scope?await db.prepare('SELECT items FROM selections WHERE store_id=? AND date=?').bind(scope,today()).first():null;
-        return answer({ member: publicMember(member), date: today(),store,sharedCheck:shared?{completed:!!shared.completed_at,reportDeleted:!shared.round_id&&!!shared.completed_at}:null, products: products.results.map(p=>({...p,ean:p.ean||''})), round, lines: lines.results, selection: selected ? JSON.parse(selected.items) : null, riskWeights:RISK_WEIGHTS });
+        return answer({ member: publicMember(member), date: today(),store,sharedCheck:shared?{roundId:shared.round_id,completed:!!shared.completed_at,reportDeleted:!shared.round_id&&!!shared.completed_at}:null, products: products.results.map(p=>({...p,ean:p.ean||''})), round, lines: lines.results, selection: selected ? JSON.parse(selected.items) : null, selectionCounts:policy?JSON.parse(policy.value):null, riskWeights:RISK_WEIGHTS });
+    }
+    if(req.method==='POST'&&path==='selection/regenerate'){
+        must(user.is_owner,'Only the protected original owner can regenerate a daily list.',403);
+        must(scope,'Choose a store before regenerating its daily list.');
+        must(body.storeId===scope&&body.date===today(),'The selected store or date has changed. Refresh and try again.',409);
+        must(body.confirm===true,'Confirm that today’s check and results will be replaced.');
+        return answer(await barcodeTransaction(db,async c=>{
+            await storeAccess(c,user,scope);
+            const owner=(await c.query("SELECT m.id FROM members m WHERE m.id=$1 AND m.active=1 AND m.role='admin' AND m.id=(SELECT value FROM settings WHERE key='owner')",[user.id])).rows[0];
+            must(owner,'Only the protected original owner can regenerate a daily list.',403);
+            const date=today();must(body.date===date,'The date has changed. Refresh and try again.',409);
+            const shared=(await c.query('SELECT * FROM store_daily_checks WHERE store_id=$1 AND date=$2 FOR UPDATE',[scope,date])).rows[0];
+            const saved=(await c.query('SELECT items FROM selections WHERE store_id=$1 AND date=$2',[scope,date])).rows[0];
+            must(saved,'There is no saved list to regenerate. Start the daily check first.',409);
+            must(body.roundId===(shared?.round_id||null),'Today’s check has changed. Refresh before regenerating it.',409);
+            const catalogue=(await c.query('SELECT * FROM products')).rows;
+            must(catalogue.length>=60,'Add at least 60 products to regenerate a daily check.');
+            const policy=(await c.query('SELECT value FROM settings WHERE key=$1',['area-counts:'+scope])).rows[0];
+            const chosen=selectDailyProducts(catalogue,policy?JSON.parse(policy.value):null);
+            if(shared?.round_id){
+                await c.query('SELECT id FROM rounds WHERE id=$1 FOR UPDATE',[shared.round_id]);
+                await c.query('DELETE FROM rotation_rechecks WHERE origin_line_id IN (SELECT id FROM lines WHERE round_id=$1)',[shared.round_id]);
+                await c.query('DELETE FROM barcode_observations WHERE round_id=$1',[shared.round_id]);
+                await c.query('DELETE FROM lines WHERE round_id=$1',[shared.round_id]);
+                await c.query('DELETE FROM rounds WHERE id=$1',[shared.round_id]);
+            }
+            const id=`store-daily:${scope}:${date}:${crypto.randomUUID()}`,created=now();
+            await c.query('UPDATE selections SET items=$1,created=$2 WHERE store_id=$3 AND date=$4',[JSON.stringify(chosen),created,scope,date]);
+            await c.query("INSERT INTO rounds(id,user_id,date,mode,store,started,store_id) VALUES($1,$2,$3,'daily',$4,$5,$6)",[id,user.id,date,store.number||store.name,created,scope]);
+            for(const [index,p] of chosen.entries())await c.query('INSERT INTO lines(id,round_id,name,ean,plu,section,position,risk,product_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id+':'+index,id,p.name,p.ean||'',p.plu,p.section,index+1,p.risk||'normal',p.id]);
+            await c.query('INSERT INTO store_daily_checks(store_id,date,round_id,completed_at) VALUES($1,$2,$3,NULL) ON CONFLICT(store_id,date) DO UPDATE SET round_id=EXCLUDED.round_id,completed_at=NULL',[scope,date,id]);
+            return {ok:true};
+        }));
+    }
+    if(req.method==='POST'&&path==='selection-policy'){
+        admin();must(scope,'Choose a store before changing its daily split.');must(body.storeId===undefined||body.storeId===scope,'The selected store has changed. Refresh and try again.',409);
+        return answer(await barcodeTransaction(db,async c=>{
+            await storeAccess(c,user,scope);
+            const current=(await c.query('SELECT role FROM members WHERE id=$1',[user.id])).rows[0];must(current?.role==='admin','Administrator access has changed.',403);
+            const catalogue=(await c.query('SELECT section FROM products')).rows;
+            const counts=validateAreaCounts(body.counts,catalogue);
+            await c.query('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',['area-counts:'+scope,JSON.stringify(counts)]);
+            const locked=(await c.query('SELECT date FROM selections WHERE store_id=$1 AND date=$2',[scope,today()])).rows.length>0;
+            return {ok:true,counts,todayLocked:locked};
+        }));
     }
     if((req.method==='GET'&&path==='barcode-reviews')||(req.method==='POST'&&['products/by-plu','barcodes/lookup','barcode-reviews/resolve','barcodes/assign'].includes(path)))return answer(await barcodeAdmin(path,body,new URL(req.url).searchParams,db,user));
     if (req.method === 'GET' && path === 'reports') {
@@ -182,12 +228,17 @@ async function run(req, db, user) {
                 must(!(shared.completed_at&&!shared.round_id),'This store has completed today’s check. Its report was deleted.',409);
                 if(shared.round_id)return {round:(await c.query('SELECT * FROM rounds WHERE id=$1',[shared.round_id])).rows[0],lines:(await c.query('SELECT l.*,m.name AS recorded_by_name FROM lines l LEFT JOIN members m ON m.id=l.recorded_by WHERE round_id=$1 ORDER BY position',[shared.round_id])).rows};
             }
-            const catalogue=(await c.query('SELECT * FROM products')).rows;must(catalogue.length>=(practice?1:60),practice?'Add a product first.':'Add at least 60 products to start a daily check.');
+            const catalogue=(await c.query('SELECT * FROM products')).rows;
             let chosen;
-            if(practice)chosen=selectProducts(catalogue,Math.min(60,catalogue.length));
+            if(practice){must(catalogue.length>0,'Add a product first.');chosen=selectProducts(catalogue,Math.min(60,catalogue.length));}
             else{
                 const saved=(await c.query('SELECT items FROM selections WHERE store_id=$1 AND date=$2',[scope,today()])).rows[0];
-                chosen=saved?JSON.parse(saved.items):selectProducts(catalogue,60);
+                if(saved)chosen=JSON.parse(saved.items);
+                else{
+                    must(catalogue.length>=60,'Add at least 60 products to start a daily check.');
+                    const policy=(await c.query('SELECT value FROM settings WHERE key=$1',['area-counts:'+scope])).rows[0];
+                    chosen=selectDailyProducts(catalogue,policy?JSON.parse(policy.value):null);
+                }
                 if(!saved)await c.query('INSERT INTO selections(store_id,date,items,created) VALUES($1,$2,$3,$4)',[scope,today(),JSON.stringify(chosen),now()]);
             }
             const id=practice?crypto.randomUUID():`store-daily:${scope}:${today()}`;
@@ -263,6 +314,7 @@ export async function handle(req, db, user) { try {
     return await run(req, db, user);
 }
 catch (e) {
+    if(e instanceof SelectionProblem)return answer({error:e.message},400);
     if(e instanceof BarcodeProblem)return answer({error:e.message,...e.details},e.status);
     if (e instanceof Problem)
         return answer({ error: e.message }, e.status);

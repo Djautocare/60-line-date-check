@@ -10,3 +10,32 @@ test('daily samples contain 60 distinct entries and vary across seeds without ar
  const a=selectProducts(items,60,rng(123)),b=selectProducts(items,60,rng(456));assert.equal(a.length,60);assert.equal(new Set(a.map(x=>x.id)).size,60);assert.notDeepEqual(a.map(x=>x.id),b.map(x=>x.id));assert.equal(items.length,90);
 });
 test('a complete 60-product catalogue includes every entry regardless of risk',()=>{const items=Array.from({length:60},(_,i)=>({id:i,risk:i%2?'high':'low'}));assert.equal(new Set(selectProducts(items,60,rng(9)).map(x=>x.id)).size,60);});
+
+test('area counts produce exactly 60 unique risk-weighted products with the requested split',async()=>{
+ const {selectDailyProducts}=await import('../server/selection.mjs');
+ const sections=['Short life','Long life','Ambient produce','Chilled produce','Bread'];
+ const items=sections.flatMap(section=>Array.from({length:40},(_,i)=>({id:section+i,section,risk:i%3===0?'high':i%3===1?'normal':'low'})));
+ const counts={'Short life':20,'Long life':15,'Ambient produce':10,'Chilled produce':10,Bread:5};
+ const result=selectDailyProducts(items,counts,rng(1234));assert.equal(result.length,60);assert.equal(new Set(result.map(p=>p.id)).size,60);
+ for(const [area,count] of Object.entries(counts))assert.equal(result.filter(p=>p.section===area).length,count);
+ assert.notDeepEqual(result.map(p=>p.id),selectDailyProducts(items,counts,rng(5678)).map(p=>p.id));
+ assert.deepEqual(selectDailyProducts(items,null,rng(777)),selectProducts(items,60,rng(777)));
+ assert.equal(items.length,200);
+});
+test('area counts reject invalid totals, fractional counts, unavailable products and malformed settings',async()=>{
+ const {validateAreaCounts,SelectionProblem}=await import('../server/selection.mjs');
+ const items=Array.from({length:70},(_,i)=>({id:i,section:'Bread',risk:'normal'}));
+ for(const counts of [undefined,[],{},'random',{Bread:59},{Bread:61},{Bread:59.5,Other:0.5},{Bread:'60'},{Bread:61,Other:-1},{Bread:59,Missing:1}])assert.throws(()=>validateAreaCounts(counts,items),SelectionProblem);
+ assert.deepEqual(validateAreaCounts({Bread:60,'New area':0},items),{Bread:60,'New area':0});
+ assert.throws(()=>validateAreaCounts({Bread:60},items.slice(0,59)),/only 59/);
+ assert.equal(validateAreaCounts(null,items),null);
+});
+test('area splits preserve risk weighting within an area and can exclude other areas',async()=>{
+ const {selectDailyProducts}=await import('../server/selection.mjs');
+ const items=[...['high','normal','low'].map(risk=>({id:risk,risk,section:'Small'})),...Array.from({length:59},(_,id)=>({id:'fill'+id,section:'Fill',risk:'normal'})),{id:'excluded',section:'Excluded',risk:'high'}];
+ const random=rng(456789),frequencies={high:0,normal:0,low:0};
+ for(let i=0;i<4000;i++){const picked=selectDailyProducts(items,{Small:1,Fill:59,Excluded:0},random);assert.equal(picked.length,60);assert.ok(!picked.some(p=>p.id==='excluded'));frequencies[picked.find(p=>p.section==='Small').id]++;}
+ assert.ok(frequencies.high>frequencies.normal*2);assert.ok(frequencies.normal>frequencies.low*1.5);assert.ok(frequencies.low>250);
+ const odd=Array.from({length:60},(_,id)=>({id,section:'__proto__',risk:'normal'}));
+ assert.equal(selectDailyProducts(odd,JSON.parse('{"__proto__":60}'),rng(1)).length,60);
+});

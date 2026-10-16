@@ -5,7 +5,7 @@ A mobile-friendly website with username/password staff accounts, an admin portal
 ## Workflow
 
 1. Admin imports each area’s product names/descriptions, **6-digit PLUs**, **areas** and optional **risk levels**, with no EAN required. There is no 60-product catalogue limit.
-2. Admin marks products **High risk**, **Normal** or **Low risk**. The daily list picks **60 unique products from the whole catalogue**, using risk to adjust selection odds. There are no fixed area quotas.
+2. Admin marks products **High risk**, **Normal** or **Low risk**. The daily list picks **60 unique products**, using risk to adjust selection odds. Admins can keep random selection across the whole catalogue or save a per-store split between areas in **Daily selection**.
 3. The first daily check generates one random selection per store for that **Europe/London calendar date**. Staff assigned to the same store see the same list. It is saved and reused, including after server restarts. Products do not repeat within a selection, but may appear again on a later day.
 4. Staff start or resume their store’s shared daily check and verify each expected EAN-13 using the camera. Confirmed variants are accepted. Unknown EANs need a neutral physical-product confirmation; only a barcode confirmed for another product triggers a red three-second warning showing its name and PLU, then scanning resumes.
 5. They select **Okay**, **Out of date**, or **Not stickered**, or **Rotation issue**. Out of date and Not stickered require a whole quantity from 1 to 9,999. Rotation issue is a flagged line without a quantity; report totals count flagged lines. Okay records zero issue items.
@@ -119,7 +119,21 @@ Open **Barcode reviews → Scan to review / assign**, or enter an EAN manually. 
 
 If the EAN is unassigned, enter a six-digit PLU, choose the displayed product/name/area, then **Confirm assignment**. Alternatively, scan (or enter) an already approved variant’s EAN to show its PLU and product name, then confirm linking the original EAN as another variant. An unassigned reference barcode requires using the PLU route instead. Only admins can approve, deny or assign links. **Edit by scanning** opens approved products for editing and routes unknown EANs to Barcode reviews. Additional approved variants are retained when catalogue details are edited.
 
-The selection uses weights High = 3, Normal = 1, Low = 0.5 with weighted random sampling without replacement. These are relative selection weights, not guaranteed check frequencies: actual inclusion chances depend on the catalogue size and risk mix. Every product remains eligible and may reappear on consecutive days. With exactly 60 catalogue entries, every entry is included; risk affects the selection only when there are more than 60. The generated selection remains fixed for the day, including after risk edits.
+### Daily product split
+
+Open **Daily selection → Selection method → Choose a count for each area**. Enter the required daily lines for **Short life**, **Long life**, **Ambient produce**, **Chilled produce** and **Bread**, then choose **Save daily split**. Other imported areas also appear automatically. Counts must be whole numbers totalling **60**; the screen shows the running total and each area's catalogue size. Set an area to **0** to exclude it. The server rejects counts larger than the available products in an area. New areas have a count of zero until included in the saved split.
+
+The split belongs to the selected store. Store admins manage their own split; the protected owner must choose a store in the header first. **Random across the whole catalogue** restores the original behaviour. Existing stores stay in this mode until a split is saved. Settings use the existing PostgreSQL `settings` table; no new database or migration is required.
+
+The selection uses weights High = 3, Normal = 1, Low = 0.5 with weighted random sampling without replacement. With a split, risk affects which products are selected **within each area**, while the area counts remain exact. These are relative weights, not guaranteed check frequencies. Products can return on consecutive days. If an area's count equals its catalogue size, all its products are included regardless of risk. Selected areas are shuffled together. Removing catalogue products can make a saved split impossible; in that case a new list is blocked with an explanation until the counts or catalogue are corrected.
+
+Saving settings does not replace today's saved list, even after an unfinished report is deleted. The new split applies to the next day whose list has not been generated. The table shows today's actual area totals separately. Practice checks use their own random sample and ignore area quotas.
+
+### Owner-only regeneration
+
+The protected original owner (`@admin` in the original setup) can select a store, open **Daily selection → Owner controls → Regenerate today's list**, and confirm. Save any split edits first. This explicitly replaces that store's current daily selection using the saved area split and risk weights. A fresh check with 60 unrecorded lines opens even if the previous check was completed or its report was deleted. Products may be picked again; a random draw does not guarantee 60 different products from the previous list.
+
+The confirmation explains that the current day's check/report, recorded results, linked rotation rechecks and that check's barcode-learning observations are permanently removed. Approved EAN assignments remain. Other stores, earlier dates and practice checks are preserved. Staff should refresh or reopen the daily check; stale line/finish requests cannot update the replacement check because it has new IDs. A repeated request based on the old check is rejected. If the saved split cannot be satisfied, the original check and results remain intact. Other admins and staff cannot regenerate, including through the API.
 
 Add at least 60 products to start a daily check. An admin can run a clearly labelled **practice check** with a smaller catalogue to test the workflow; it never counts as the daily 60-line check.
 
