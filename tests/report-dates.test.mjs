@@ -20,3 +20,10 @@ test('relative periods include today and use calendar days through clock changes
  assert.deepEqual(reportRange('period','this_year','','2026-10-14'),{from:'2026-01-01',to:'2026-10-14'});
  assert.deepEqual(reportRange('all','','','2026-10-14'),{});
 });
+test('per-product Checked at uses saved UK time, handles daylight saving and does not invent missing times',async()=>{
+ const {formatCheckTime}=await import('../src/report-order.mjs');
+ assert.equal(formatCheckTime('2026-10-16T08:36:54.000Z'),'16/10/2026, 09:36:54');
+ assert.equal(formatCheckTime('2026-12-16T08:36:54.000Z'),'16/12/2026, 08:36:54');
+ assert.equal(formatCheckTime('2026-07-01T23:15:09.000Z'),'02/07/2026, 00:15:09');
+ for(const value of [null,undefined,'','not a time'])assert.equal(formatCheckTime(value),'—');
+});

@@ -38,32 +38,28 @@ test('owner is protected from every store admin and can filter/manage every stor
   assert.equal((await db.prepare("SELECT role FROM members WHERE id='bob'").first()).role,'admin');
  }finally{await db.close();}
 });
-test('store staff share progress and completion, keep scan attribution and reject stale changes',async()=>{
+test('store staff share progress and completion, keep recorder attribution and reject stale changes',async()=>{
  const {db,call,seed}=await fixture();try{
   assert.equal((await seed()).status,200);
   const first=await call('rounds/start',{mode:'daily'},'admina');assert.equal(first.status,200);const {round,lines}=first.data;
   const second=await call('rounds/start',{mode:'daily'},'amy');assert.equal(second.data.round.id,round.id);assert.deepEqual(second.data.lines,lines);
   const other=await call('rounds/start',{mode:'daily'},'bob');assert.equal(other.status,200);assert.notEqual(other.data.round.id,round.id);assert.equal(other.data.round.store_id,'b');
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM selections').first()).n,2);
-  const l=lines[0],ean='4088600303390';
-  let r=await call('lines/verify',{id:l.id,ean,method:'camera',revision:0},'alice');assert.equal(r.data.needsConfirmation,true);assert.equal(r.data.revision,1);
-  r=await call('lines/verify',{id:l.id,ean,method:'camera',revision:r.data.revision,confirmUnknown:true},'alice');assert.equal(r.data.verified,true);assert.equal(r.data.revision,2);
-  assert.equal((await call('lines/save',{id:l.id,status:'okay',quantity:0,revision:2},'amy')).status,400);
-  r=await call('lines/save',{id:l.id,status:'rotation_issue',quantity:0,revision:2},'alice');assert.equal(r.status,200);assert.equal(r.data.revision,3);
+  const l=lines[0];
+  let r=await call('lines/save',{id:l.id,status:'rotation_issue',quantity:0,revision:0},'alice');assert.equal(r.status,200);assert.equal(r.data.revision,1);
   r=await call('state',undefined,'amy');assert.equal(r.data.round.id,round.id);assert.equal(r.data.lines[0].recorded_by,'alice');assert.equal(r.data.lines[0].recorded_by_name,'alice');
   r=await call('lines/save',{id:l.id,status:'off_sale',quantity:0,revision:0},'amy');assert.equal(r.status,409);assert.equal(r.data.code,'line_changed');
-  r=await call('lines/verify',{id:l.id,ean,method:'camera',revision:0},'amy');assert.equal(r.status,409);assert.equal(r.data.code,'line_changed');
   for(const x of lines.slice(1)){const r=await call('lines/save',{id:x.id,status:'off_sale',quantity:0,revision:0},'amy');assert.equal(r.status,200);}
   assert.equal((await call('rounds/finish',{id:round.id},'amy')).status,200);
   assert.equal((await call('rounds/finish',{id:round.id},'alice')).status,200);
   const state=(await call('state',undefined,'alice')).data;assert.ok(state.round.finished);assert.equal(state.sharedCheck.completed,true);
   assert.equal((await call('lines/save',{id:l.id,status:'off_sale',quantity:0},'alice')).status,400);
-  assert.equal((await call('lines/verify',{id:l.id,ean,method:'camera'},'alice')).status,400);
+  assert.equal((await call('lines/verify',{id:l.id},'alice')).status,410);
   assert.equal((await call('rounds/start',{},'alice')).data.round.id,round.id);
   const report=(await call('report/'+encodeURIComponent(round.id),undefined,'amy')).data;assert.equal(report.round.finished_by,'amy');assert.equal(report.lines[0].recorded_by_name,'alice');assert.match(report.round.user_name,/alice/);assert.match(report.round.user_name,/amy/);
   assert.equal((await call('reports?checkedBy=alice',undefined,'admina')).data.total,1);
   assert.equal((await call('reports?checkedBy=amy',undefined,'admina')).data.total,1);
-  const proposal=await db.prepare('SELECT * FROM barcode_candidates WHERE ean=?').bind(ean).first();assert.equal((await db.prepare('SELECT observed_by FROM barcode_observations WHERE candidate_id=?').bind(proposal.id).first()).observed_by,'alice');
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM barcode_observations').first()).n,0);
   const recheck=await db.prepare('SELECT * FROM rotation_rechecks').first();assert.ok(recheck);
   await db.prepare('UPDATE rotation_rechecks SET due_date=? WHERE id=?').bind(date(),recheck.id).run();assert.equal((await call('rotation-rechecks',undefined,'amy')).data.rechecks[0].flagged_by,'alice');
   assert.equal((await call('reports/delete',{id:round.id},'admina')).status,200);
@@ -80,19 +76,19 @@ test('guessed report, line and recheck IDs cannot cross stores; the owner can ac
   assert.equal((await call('reports',undefined,'owner','all')).data.total,2);
   for(const user of ['alice','admina']){
    assert.equal((await call('report/'+encodeURIComponent(b.round.id),undefined,user)).status,404);
-   assert.equal((await call('lines/verify',{id:b.lines[0].id,ean:'4088600303390',method:'camera'},user)).status,404);
-   assert.equal((await call('lines/no-ean',{id:b.lines[0].id},user)).status,404);
+   assert.equal((await call('lines/verify',{id:b.lines[0].id,ean:'4088600303390',method:'camera'},user)).status,410);
+   assert.equal((await call('lines/no-ean',{id:b.lines[0].id},user)).status,410);
    assert.equal((await call('lines/save',{id:b.lines[0].id,status:'off_sale',quantity:0},user)).status,404);
    assert.equal((await call('rounds/finish',{id:b.round.id},user)).status,404);
    assert.equal((await call('rotation-rechecks',undefined,user)).data.total,0);
-   assert.equal((await call('rotation-rechecks/verify',{id:'qb',ean:'4088600303390',method:'camera'},user)).status,404);
-   assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},user)).status,404);
+   assert.equal((await call('rotation-rechecks/verify',{id:'qb',ean:'4088600303390',method:'camera'},user)).status,410);
+   assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},user)).status,410);
    assert.equal((await call('rotation-rechecks/save',{id:'qb',status:'off_sale'},user)).status,404);
   }
   assert.equal((await call('reports/delete',{id:b.round.id},'admina')).status,404);
   assert.equal((await call('report/'+encodeURIComponent(b.round.id),undefined,'owner','all')).status,200);
   assert.equal((await call('rotation-rechecks',undefined,'owner','all')).data.total,1);
-  assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},'owner','all')).status,200);
+  assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},'owner','all')).status,410);
   assert.equal((await call('rotation-rechecks/save',{id:'qb',status:'off_sale'},'owner','all')).status,200);
   assert.equal((await call('reports/delete',{id:b.round.id},'owner','all')).status,200);
   assert.equal((await call('report/'+encodeURIComponent(a.round.id),undefined,'alice')).status,200);
@@ -127,5 +123,30 @@ test('username membership requires explicit owner transfers, revokes sessions an
   assert.equal((await call('members/create',{username:'new.staff',name:'New',password:'long-new-password-123',role:'staff',storeId:'b'},'admina')).status,403);
   assert.equal((await call('members/create',{username:'new.staff',name:'New',password:'long-new-password-123',role:'staff',storeId:'b'},'owner','all')).status,200);
   await db.prepare("UPDATE members SET store_id=NULL WHERE id='admina'").run();assert.equal((await call('members',undefined,'admina')).status,403);
+ }finally{await db.close();}
+});
+test('per-product timestamps are available to the owner and store admin, and redacted for staff on every read route',async()=>{
+ const {db,call,seed}=await fixture();try{
+  await seed();const check=(await call('rounds/start',{},'alice')).data;
+  assert.equal((await call('lines/save',{id:check.lines[0].id,status:'rotation_issue',quantity:0,revision:0},'alice')).status,200);
+  const report='report/'+encodeURIComponent(check.round.id);
+  for(const user of ['alice','amy']){
+   for(const [path,body] of [['state',undefined],[report,undefined],['rounds/start',{}]]){
+    const r=await call(path,body,user);assert.equal(r.status,200);const row=r.data.lines.find(l=>l.id===check.lines[0].id);assert.equal(row.saved_at,null);assert.equal(row.verified_at,null);assert.equal(row.status,'rotation_issue');assert.equal(row.recorded_by_name,'alice');
+   }
+  }
+  const adminTime=(await call(report,undefined,'admina')).data.lines[0].saved_at;assert.ok(Number.isFinite(Date.parse(adminTime)));
+  assert.equal((await call(report,undefined,'owner','legacy')).data.lines[0].saved_at,adminTime);
+  assert.equal((await call(report,undefined,'owner','all')).data.lines[0].saved_at,adminTime);
+  assert.equal((await call(report,undefined,'adminb')).status,404);
+  // A historical camera timestamp is private too.
+  await db.prepare("UPDATE lines SET verified_at='2026-10-01T08:00:00Z' WHERE id=?").bind(check.lines[0].id).run();
+  assert.equal((await call(report,undefined,'alice')).data.lines[0].verified_at,null);
+  assert.equal((await call(report,undefined,'admina')).data.lines[0].verified_at,'2026-10-01T08:00:00Z');
+  await db.prepare("INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) VALUES('private-time',?,?,?)").bind(check.lines[0].id,date(),new Date().toISOString()).run();
+  assert.equal((await call('rotation-rechecks/save',{id:'private-time',status:'okay'},'amy')).status,200);
+  const staff=(await call('rotation-rechecks?view=history',undefined,'alice')).data.rechecks[0];assert.equal(staff.checked_at,null);assert.equal(staff.verified_at,null);assert.equal(staff.created,null);assert.equal(staff.status,'okay');assert.equal(staff.checked_by_name,'amy');
+  for(const [user,scope] of [['admina',undefined],['owner','legacy'],['owner','all']])assert.ok((await call('rotation-rechecks?view=history',undefined,user,scope)).data.rechecks[0].checked_at);
+  assert.equal((await call('rotation-rechecks?view=history',undefined,'adminb')).data.total,0);
  }finally{await db.close();}
 });

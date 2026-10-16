@@ -102,13 +102,12 @@ test('regeneration is owner-only, uses saved quotas and rejects stale checks wit
 test('regeneration reopens completed checks, removes their rechecks and evidence, and supports deleted reports',async()=>{
  const {db,call}=await fixture();try{
   await call('selection-policy',{counts:policy});const original=(await call('rounds/start',{},'staff')).data;
-  const first=original.lines[0];const ean='4088600303390';
-  assert.equal((await call('lines/verify',{id:first.id,ean,method:'camera',confirmUnknown:true},'staff')).data.verified,true);
+  const first=original.lines[0];
   assert.equal((await call('lines/save',{id:first.id,status:'rotation_issue',quantity:0},'staff')).status,200);
   for(const l of original.lines.slice(1))assert.equal((await call('lines/save',{id:l.id,status:'off_sale',quantity:0},'staff')).status,200);
   assert.equal((await call('rounds/finish',{id:original.round.id},'staff')).status,200);
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM rotation_rechecks').first()).n,1);
-  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM barcode_observations').first()).n,1);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM barcode_observations').first()).n,0);
   const before=(await call('state')).data;assert.equal(before.sharedCheck.completed,true);
   const body={storeId:'legacy',date:before.date,roundId:original.round.id,confirm:true};
   assert.equal((await call('selection/regenerate',body,'owner','legacy')).status,200);

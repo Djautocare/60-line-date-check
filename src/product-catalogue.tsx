@@ -1,0 +1,33 @@
+import {useEffect,useRef,useState} from 'react';
+import {Download,Loader2,Package,Pencil,Plus,Search,Trash2,X} from 'lucide-react';
+import CatalogueImport from './catalogue-import';
+import {CHECK_AREA_ORDER} from '../shared/area-order.mjs';
+import type {Product,Risk} from './types';
+type Props={products:Product[];request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>;onExport:()=>void};
+const riskLabels:Record<Risk,string>={high:'High risk',normal:'Normal',low:'Low risk'};
+const empty:Product={id:'',name:'',plu:'',section:'',risk:'normal',ean:''};
+export default function ProductCatalogue({products,request,onChanged,onExport}:Props){
+ const [search,setSearch]=useState(''),[area,setArea]=useState(''),[editing,setEditing]=useState<Product|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const areas=Array.from(new Set([...CHECK_AREA_ORDER,...products.map(p=>p.section)]));
+ const filtered=products.filter(p=>(!area||p.section===area)&&`${p.name} ${p.plu}`.toLowerCase().includes(search.toLowerCase()));
+ async function remove(p:Product){if(!window.confirm(`Delete ${p.name} from the catalogue? Existing checks keep their saved product details.`))return;setBusy(true);setError('');try{await request('products/delete',{id:p.id});await onChanged();setNotice('Product deleted.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ return <>
+  <div className="page-heading"><div><p className="eyebrow dark">ADMIN / PRODUCTS</p><h1>Product catalogue<span className="pill">{products.length}</span></h1><p>Manage product names, six-digit PLUs, areas and risk levels.</p></div><div className="button-row"><button className="button primary" disabled={busy} onClick={()=>{setNotice('');setEditing({...empty});}}><Plus size={16}/>Add product</button><button className="button secondary" onClick={onExport}><Download size={16}/>Export CSV</button></div></div>
+  {error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="report-notice" role="status">{notice}</p>}
+  <CatalogueImport request={request} onChanged={onChanged}/>
+  <div className="panel catalogue-table"><div className="catalogue-toolbar"><div className="search-input"><Search size={18}/><input aria-label="Search catalogue" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name or PLU…"/></div><select aria-label="Filter area" value={area} onChange={e=>setArea(e.target.value)}><option value="">All areas</option>{areas.map(a=><option key={a}>{a}</option>)}</select></div>
+   {filtered.length?<div className="table-scroll"><table><thead><tr><th>Product</th><th>PLU</th><th>Area / risk</th><th/></tr></thead><tbody>{filtered.map(p=><tr key={p.id}><td><strong>{p.name}</strong></td><td className="mono">{p.plu}</td><td><span className="area-badge">{p.section}</span><small><span className={'risk-badge '+p.risk}>{riskLabels[p.risk||'normal']}</span></small></td><td><div className="table-actions"><button className="icon-btn" disabled={busy} aria-label={'Edit '+p.name} onClick={()=>{setNotice('');setEditing({...p});}}><Pencil size={16}/></button><button disabled={busy} className="icon-btn danger" aria-label={'Delete '+p.name} onClick={()=>void remove(p)}><Trash2 size={16}/></button></div></td></tr>)}</tbody></table></div>:<div className="empty-state"><Package size={36}/><h3>{products.length?'No matching products':'Build your product list'}</h3><p>{products.length?'Try another search or area.':'Import an area’s list or choose Add product.'}</p></div>}
+   <div className="table-bottom">{filtered.length} products shown · Catalogue has no 60-product limit</div>
+  </div>
+  {editing&&<ProductEditor key={editing.id||'new'} product={editing} areas={areas} request={request} onClose={()=>setEditing(null)} onSaved={async()=>{await onChanged();setEditing(null);setNotice('Product saved to the catalogue.');}}/>}
+ </>;
+}
+function ProductEditor({product,areas,request,onClose,onSaved}:{product:Product;areas:string[];request:Props['request'];onClose:()=>void;onSaved:()=>Promise<void>}){
+ const dialog=useRef<HTMLDialogElement>(null);const [draft,setDraft]=useState({...product}),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ useEffect(()=>{const element=dialog.current;if(element&&!element.open)element.showModal();},[]);
+ async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{await request('products',{id:draft.id||undefined,name:draft.name,plu:draft.plu,section:draft.section,risk:draft.risk});await onSaved();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ return <dialog ref={dialog} className="product-editor" aria-labelledby="product-editor-title" onCancel={e=>{e.preventDefault();if(!busy)onClose();}} onClick={e=>{if(e.target===dialog.current&&!busy){const r=dialog.current.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)onClose();}}}>
+  <div className="panel-heading"><div><h2 id="product-editor-title">{product.id?'Edit product':'Add product'}</h2><small>{product.id?product.name:'Enter the product details below.'}</small></div><button type="button" className="icon-btn" aria-label="Close product editor" disabled={busy} onClick={onClose}><X size={20}/></button></div>
+  <form onSubmit={e=>void save(e)}><fieldset disabled={busy}><label>Product name<input autoFocus required maxLength={160} value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></label><label>6-digit PLU<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={draft.plu} onChange={e=>setDraft({...draft,plu:e.target.value.replace(/\D/g,'')})}/></label><label>Area<input required maxLength={80} list="product-editor-areas" value={draft.section} onChange={e=>setDraft({...draft,section:e.target.value})}/><datalist id="product-editor-areas">{areas.map(a=><option value={a} key={a}/>)}</datalist></label><label>Risk level<select value={draft.risk} onChange={e=>setDraft({...draft,risk:e.target.value as Risk})}><option value="high">High risk — appears more often</option><option value="normal">Normal — standard chance</option><option value="low">Low risk — appears less often</option></select></label><p className="form-footnote">Risk affects future random selections. Existing checks and reports keep their saved product details.</p><div className="button-row"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="submit" className="button primary">{busy?<Loader2 size={16} className="spin"/>:<Plus size={16}/>}Save product</button></div></fieldset>{error&&<p className="error" role="alert">{error}</p>}</form>
+ </dialog>;
+}

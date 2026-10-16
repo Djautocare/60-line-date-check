@@ -18,7 +18,7 @@ test('migration upgrades an existing catalogue and report without losing their r
   await engine.query('ALTER TABLE lines DROP COLUMN barcode_candidate_id');await engine.query('ALTER TABLE lines DROP COLUMN product_id');await engine.query('DROP TABLE barcode_observations');await engine.query('DROP TABLE barcode_candidates');await engine.query('DROP TABLE product_barcodes');await engine.query('DROP TABLE rotation_rechecks');await engine.query('DELETE FROM schema_migrations WHERE version>=3');
   await openDatabase('test',{pool});
   const recheck=(await engine.query('SELECT * FROM rotation_rechecks')).rows[0];assert.equal(recheck.origin_line_id,'old-line');assert.equal(recheck.due_date,'2026-10-15');
-  await openDatabase('test',{pool});assert.equal((await engine.query('SELECT COUNT(*) AS count FROM schema_migrations')).rows[0].count,7);
+  await openDatabase('test',{pool});assert.equal((await engine.query('SELECT COUNT(*) AS count FROM schema_migrations')).rows[0].count,8);
   assert.equal((await engine.query('SELECT COUNT(*) AS count FROM products')).rows[0].count,1);
  }finally{await engine.close();}
 });

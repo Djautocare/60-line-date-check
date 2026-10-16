@@ -73,20 +73,18 @@ export async function barcodeAdmin(path,body,params,db,user){
 }
 export async function importCatalogue(db,body,user){
  const items=Array.isArray(body.items)?body.items:[body];must(items.length>0&&items.length<=2000,'Import between 1 and 2,000 products.');
- const clean=items.map(p=>({id:p.id?String(p.id):null,name:String(p.name||'').trim(),plu:String(p.plu||'').trim(),ean:String(p.ean||'').trim(),section:String(p.section||p.area||'').trim(),risk:p.risk===undefined?null:String(p.risk)}));
- for(const p of clean){must(p.name.length>0&&p.name.length<=160,'Every product needs a name of up to 160 characters.');must(/^\d{6}$/.test(p.plu),'Every product needs a 6-digit PLU. Keep leading zeros.');must(p.section.length>0&&p.section.length<=80,'Every product needs an area of up to 80 characters.');must(!p.ean||validEAN13(p.ean),`Invalid EAN-13: ${p.ean}`);must(p.risk===null||['high','normal','low'].includes(p.risk),'Choose High risk, Normal or Low risk.');}
+ const clean=items.map(p=>({id:p.id?String(p.id):null,name:String(p.name||'').trim(),plu:String(p.plu||'').trim(),section:String(p.section||p.area||'').trim(),risk:p.risk===undefined?null:String(p.risk)}));
+ for(const p of clean){must(p.name.length>0&&p.name.length<=160,'Every product needs a name of up to 160 characters.');must(/^\d{6}$/.test(p.plu),'Every product needs a 6-digit PLU. Keep leading zeros.');must(p.section.length>0&&p.section.length<=80,'Every product needs an area of up to 80 characters.');must(p.risk===null||['high','normal','low'].includes(p.risk),'Choose High risk, Normal or Low risk.');}
  must(new Set(clean.map(p=>p.plu)).size===clean.length,'Your import contains duplicate PLUs. Review these rows first.');
- const eans=clean.filter(p=>p.ean).map(p=>p.ean);must(new Set(eans).size===eans.length,'Your import contains duplicate barcodes.');
  return barcodeTransaction(db,async c=>{
   for(const p of clean){
    let existing=p.id?await one(c,'SELECT * FROM products WHERE id=$1',[p.id]):null;
    if(p.id)must(existing,'Product not found.',404);
    if(!p.id){const matches=(await c.query('SELECT * FROM products WHERE plu=$1',[p.plu])).rows;must(matches.length<=1,`PLU ${p.plu} already has several catalogue products. Edit those individually before importing.`);existing=matches[0];}
-   if(!existing&&p.ean){const owner=await barcodeOwner(c,p.ean);must(!owner,`EAN ${p.ean} already belongs to ${owner?.name} (PLU ${owner?.plu}).`,409);}
    const id=existing?.id||crypto.randomUUID();
+   const duplicate=await one(c,'SELECT id FROM products WHERE plu=$1 AND id<>$2 LIMIT 1',[p.plu,id]);must(!duplicate,`PLU ${p.plu} already belongs to another product. Edit that product or choose a different PLU.`,409);
    if(existing)await c.query('UPDATE products SET name=$1,plu=$2,section=$3,risk=COALESCE($4,risk) WHERE id=$5',[p.name,p.plu,p.section,p.risk,id]);
    else await c.query("INSERT INTO products(id,name,plu,ean,section,risk) VALUES($1,$2,$3,NULL,$4,COALESCE($5,'normal'))",[id,p.name,p.plu,p.section,p.risk]);
-   if(p.ean){await approve(c,p.ean,id,user,'admin_catalogue');await c.query('UPDATE products SET ean=$1 WHERE id=$2',[p.ean,id]);}
   }
   return {ok:true,count:clean.length};
  });

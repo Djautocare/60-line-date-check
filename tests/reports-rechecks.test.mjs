@@ -32,7 +32,7 @@ test('report date and staff filters reach older pages and share store daily repo
   assert.equal((await call('reports?checkedBy='+encodeURIComponent("' OR 1=1 --"))).data.total,0);
  }finally{await db.close();}
 });
-test('rotation follow-ups require a new scan, recur next day, and preserve original reports',async()=>{
+test('rotation follow-ups record directly, recur next day, and preserve original reports',async()=>{
  const {db,call,round}=await fixture();try{
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   await round('daily',admin,today);
@@ -41,15 +41,11 @@ test('rotation follow-ups require a new scan, recur next day, and preserve origi
   assert.equal((await call('rounds/finish',{id:'daily'})).status,200);
   let queue=await call('rotation-rechecks');assert.equal(queue.data.total,0);assert.equal(queue.data.upcoming,1);
   const scheduled=await db.prepare('SELECT * FROM rotation_rechecks').first();assert.equal(scheduled.due_date,nextDate(today));
-  assert.equal((await call('rotation-rechecks/verify',{id:scheduled.id,ean:'4088600303390',method:'camera'},staff)).status,400);
+  assert.equal((await call('rotation-rechecks/save',{id:scheduled.id,status:'okay'},staff)).status,400);
   const yesterday=new Date(new Date(today+'T00:00:00Z').getTime()-86400000).toISOString().slice(0,10);
   await db.prepare('UPDATE rotation_rechecks SET due_date=?,id=? WHERE id=?').bind(yesterday,'flag:recheck:'+yesterday,scheduled.id).run();
   scheduled.id='flag:recheck:'+yesterday;
   queue=await call('rotation-rechecks',undefined,staff);assert.equal(queue.data.total,1);assert.equal(queue.data.rechecks[0].flagged_by,'Admin');
-  assert.equal((await call('rotation-rechecks/save',{id:scheduled.id,status:'okay'},staff)).status,400);
-  assert.equal((await call('rotation-rechecks/verify',{id:scheduled.id,ean:'0000000000000',method:'camera'},staff)).status,409);
-  assert.equal((await call('rotation-rechecks/verify',{id:scheduled.id,ean:'4088600303390',method:'camera'},staff)).status,200);
-  assert.equal((await call('rotation-rechecks/save',{id:scheduled.id,status:'okay'},admin)).status,400);
   assert.equal((await call('rotation-rechecks/save',{id:scheduled.id,status:'rotation_issue',quantity:3},staff)).status,400);
   let saved=await call('rotation-rechecks/save',{id:scheduled.id,status:'rotation_issue'},staff);assert.equal(saved.status,200);assert.equal(saved.data.nextDue,nextDate(today));
   assert.equal((await call('rotation-rechecks/save',{id:scheduled.id,status:'okay'},staff)).status,409);
@@ -57,7 +53,6 @@ test('rotation follow-ups require a new scan, recur next day, and preserve origi
   assert.equal((await call('rotation-rechecks')).data.upcoming,1);
   const followup=await db.prepare('SELECT * FROM rotation_rechecks WHERE status IS NULL').first();
   await db.prepare('UPDATE rotation_rechecks SET due_date=? WHERE id=?').bind(today,followup.id).run();
-  assert.equal((await call('rotation-rechecks/verify',{id:followup.id,ean:'4088600303390',method:'manual'},admin)).status,200);
   assert.equal((await call('rotation-rechecks/save',{id:followup.id,status:'okay'},admin)).status,200);
   assert.equal((await call('rotation-rechecks')).data.total,0);assert.equal((await call('rotation-rechecks')).data.upcoming,0);
   history=await call('rotation-rechecks?view=history');assert.equal(history.data.total,2);
@@ -98,7 +93,7 @@ test('only admins can delete reports and all linked follow-ups are removed atomi
   assert.equal((await call('reports/delete',{id:'unfinished'})).status,200);
  }finally{await db.close();}
 });
-test('off-sale daily lines complete without a scan and off-sale rotation rechecks return tomorrow',async()=>{
+test('off-sale results remain separate from inspections and rotation rechecks return tomorrow',async()=>{
  const {db,call,round}=await fixture();try{
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   await round('unavailable',staff,today);
@@ -113,7 +108,7 @@ test('off-sale daily lines complete without a scan and off-sale rotation recheck
   await round('original-rotation',admin,'2026-10-13');
   await db.prepare("INSERT INTO lines(id,round_id,name,ean,plu,section,position,status,quantity,verified_at) VALUES('rotation-origin','original-rotation','Bread','4088600303390','123456','Bread chiller',1,'rotation_issue',0,'2026-10-13T12:00:00Z')").run();
   await db.prepare("INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) VALUES('rotation-today','rotation-origin',?,'2026-10-13T12:00:00Z')").bind(today).run();
-  assert.equal((await call('rotation-rechecks/save',{id:'rotation-today',status:'okay'},staff)).status,400);
+  assert.equal((await call('rotation-rechecks/save',{id:'rotation-today',status:'invalid'},staff)).status,400);
   const saved=await call('rotation-rechecks/save',{id:'rotation-today',status:'off_sale'},staff);assert.equal(saved.status,200);assert.equal(saved.data.nextDue,nextDate(today));
   const history=(await call('rotation-rechecks?view=history')).data.rechecks[0];assert.equal(history.status,'off_sale');assert.equal(history.verified_at,null);assert.equal(history.verified_by,null);assert.equal(history.method,null);assert.equal(history.checked_by_name,'Colleague');
   assert.equal((await call('rotation-rechecks')).data.upcoming,1);

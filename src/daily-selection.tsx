@@ -1,12 +1,12 @@
 import {CHECK_AREA_ORDER} from '../shared/area-order.mjs';
 import {useEffect,useMemo,useState} from 'react';
-import {Camera,Save,Shuffle} from 'lucide-react';
+import {Save,Shuffle} from 'lucide-react';
 import type {Product,Risk,Store} from './types';
 
-type Props={products:Product[];store:Store|null;counts:Record<string,number>|null;selection:Product[]|null;owner:boolean;date:string;roundId:string|null;onRegenerated:()=>Promise<void>;request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>;onEditRisk:()=>void};
+type Props={products:Product[];store:Store|null;counts:Record<string,number>|null;selection:Product[]|null;owner:boolean;date:string;roundId:string|null;onRegenerated:()=>Promise<void>;request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>};
 const preferred:readonly string[]=CHECK_AREA_ORDER;
 const riskLabels:Record<Risk,string>={high:'High risk',normal:'Normal',low:'Low risk'};
-export default function DailySelection({products,store,counts,selection,owner,date,roundId,onRegenerated,request,onChanged,onEditRisk}:Props){
+export default function DailySelection({products,store,counts,selection,owner,date,roundId,onRegenerated,request,onChanged}:Props){
  const available=useMemo(()=>{const result=new Map<string,number>();for(const p of products)result.set(p.section,(result.get(p.section)||0)+1);return result;},[products]);
  // Keep saved areas visible even after catalogue renames or deletions.
  const areas=Array.from(new Set([...available.keys(),...Object.keys(counts||{}),...(selection||[]).map(p=>p.section)])).sort((a,b)=>{
@@ -36,7 +36,7 @@ export default function DailySelection({products,store,counts,selection,owner,da
   try{await request('selection/regenerate',{storeId:store.id,date,roundId,confirm:true});await onRegenerated();setNotice(`Today’s list for ${storeName} has been regenerated using the saved settings. The shared check is ready to start again. Staff should refresh or reopen it.`);}catch(e){setError((e as Error).message);}finally{setBusy(false);}
  }
  return <>
-  <div className="page-heading"><div><p className="eyebrow dark">ADMIN / DAILY SELECTION</p><h1>Daily product split</h1><p>Set how many of the 60 daily lines come from each area.</p></div><button className="button secondary" onClick={onEditRisk}><Camera size={18}/>Edit risk by scanning</button></div>
+  <div className="page-heading"><div><p className="eyebrow dark">ADMIN / DAILY SELECTION</p><h1>Daily product split</h1><p>Set how many of the 60 daily lines come from each area.</p></div></div>
   {!store?<div className="panel empty-state"><h2>Choose a store first</h2><p>Use the store filter above to manage its daily split. Each store can have its own settings.</p></div>:<form className="panel area-selection" onSubmit={e=>void save(e)}>
    <div className="panel-heading"><h3>{storeName}</h3><Shuffle size={20}/></div>
    <fieldset disabled={busy}>
