@@ -99,7 +99,7 @@ The mobile navigation fits all account tabs within the screen. The page is const
 
 Products need a name/description, six-digit PLU and area, with High risk, Normal or Low risk. In **Product catalogue**, choose **Add product** or a row’s **Edit** pencil. A modal dialog opens with all four fields populated for editing. Save changes there, or use Cancel or Escape to discard the draft. Editing no longer jumps to the top of the page. Duplicate PLUs are rejected; existing checks and reports keep their original product snapshots.
 
-Use **Import an area** to choose a prepared CSV. Review and edit each PLU, description and area before confirming. Choosing a file alone does not import it. The app does not perform OCR.
+Only the protected original owner (`@admin` in the original setup) sees **Import an area**, its CSV picker, template and preview. CSV batches are also restricted to that account on the server, including one-row imports. Store admins can still add and edit individual products and export the catalogue. The owner can use **Import an area** to choose a prepared CSV. Review and edit each PLU, description and area before confirming. Choosing a file alone does not import it. The app does not perform OCR.
 
 ```csv
 name,plu,area,risk

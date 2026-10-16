@@ -77,6 +77,7 @@ export async function importCatalogue(db,body,user){
  for(const p of clean){must(p.name.length>0&&p.name.length<=160,'Every product needs a name of up to 160 characters.');must(/^\d{6}$/.test(p.plu),'Every product needs a 6-digit PLU. Keep leading zeros.');must(p.section.length>0&&p.section.length<=80,'Every product needs an area of up to 80 characters.');must(p.risk===null||['high','normal','low'].includes(p.risk),'Choose High risk, Normal or Low risk.');}
  must(new Set(clean.map(p=>p.plu)).size===clean.length,'Your import contains duplicate PLUs. Review these rows first.');
  return barcodeTransaction(db,async c=>{
+  if(Object.hasOwn(body,'items')){const owner=await one(c,"SELECT id FROM members WHERE id=$1 AND active=1 AND role='admin' AND id=(SELECT value FROM settings WHERE key='owner')",[user.id]);must(owner,'Only the protected original owner can import CSV products.',403);}
   for(const p of clean){
    let existing=p.id?await one(c,'SELECT * FROM products WHERE id=$1',[p.id]):null;
    if(p.id)must(existing,'Product not found.',404);

@@ -186,7 +186,7 @@ async function run(req, db, user) {
         });
         return answer({ok:true});
     }
-    if(req.method==='POST'&&path==='products'){admin();return answer(await importCatalogue(db,body,user));}
+    if(req.method==='POST'&&path==='products'){admin();if(Object.hasOwn(body,'items'))must(user.is_owner,'Only the protected original owner can import CSV products.',403);return answer(await importCatalogue(db,body,user));}
     if (req.method === 'POST' && path === 'products/delete') {
         admin();
         await db.prepare('DELETE FROM products WHERE id=?').bind(String(body.id)).run();

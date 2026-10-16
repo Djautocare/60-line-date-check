@@ -150,3 +150,22 @@ test('per-product timestamps are available to the owner and store admin, and red
   assert.equal((await call('rotation-rechecks?view=history',undefined,'adminb')).data.total,0);
  }finally{await db.close();}
 });
+test('CSV imports require the protected owner ID; store admins retain individual catalogue editing',async()=>{
+ const {db,call}=await fixture();try{
+  const items=[{name:'Bread',plu:'001234',section:'Bread',risk:'normal'},{name:'Apples',plu:'002345',section:'Ambient produce',risk:'high'}];
+  // An administrator named admin is not the protected original owner.
+  await db.prepare("UPDATE members SET username='admin' WHERE id='admina'").run();
+  for(const user of ['admina','adminb','alice'])for(const rows of [items,items.slice(0,1)])assert.equal((await call('products',{items:rows},user)).status,403);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM products').first()).n,0);
+  assert.equal((await call('products',{items},'owner','all')).status,200);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM products').first()).n,2);
+  const bread=(await call('state',undefined,'admina')).data.products.find(p=>p.plu==='001234');
+  const changed={id:bread.id,name:'Updated bread',plu:'001234',section:'Bread',risk:'high'};
+  assert.equal((await call('products',changed,'admina')).status,200);
+  assert.equal((await call('products',{name:'Milk',plu:'003456',section:'Long life'},'adminb')).status,200);
+  assert.equal((await call('products',{items:[{...changed,name:'Blocked overwrite'}]},'admina')).status,403);
+  assert.equal((await call('state',undefined,'admina')).data.products.find(p=>p.id===bread.id).name,'Updated bread');
+  assert.equal((await call('products',{items:[{...changed,name:'Owner update'}]},'owner','legacy')).status,200);
+  assert.equal((await call('state')).data.products.find(p=>p.id===bread.id).name,'Owner update');
+ }finally{await db.close();}
+});

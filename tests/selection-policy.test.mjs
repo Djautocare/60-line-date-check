@@ -11,7 +11,7 @@ async function fixture(){
  for(const [id,role,store] of [['owner','admin','legacy'],['admina','admin','legacy'],['adminb','admin','b'],['staff','staff','legacy']])await db.prepare('INSERT INTO members(id,username,name,role,password_hash,created,store_id) VALUES(?,?,?,?,?,?,?)').bind(id,id,id,role,'unused','2026-10-01',store).run();
  await db.prepare("INSERT INTO settings(key,value) VALUES('owner','owner')").run();
  const call=async(path,body,user='admina',scope)=>{const r=await handle(new Request('http://localhost:3001/api/'+path,{method:body===undefined?'GET':'POST',headers:{...(scope?{'x-store-id':scope}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})}),db,{id:user});return {status:r.status,data:await r.json()};};
- const imported=await call('products',{items:Object.keys(policy).flatMap((section,index)=>Array.from({length:30},(_,i)=>({name:section+' '+i,plu:String(100000+index*100+i),section})))});assert.equal(imported.status,200);
+ const imported=await call('products',{items:Object.keys(policy).flatMap((section,index)=>Array.from({length:30},(_,i)=>({name:section+' '+i,plu:String(100000+index*100+i),section})))},'owner');assert.equal(imported.status,200);
  return {db,call};
 }
 function assertSplit(lines,counts){assert.equal(lines.length,60);for(const [area,count] of Object.entries(counts))assert.equal(lines.filter(l=>l.section===area).length,count,area);}
