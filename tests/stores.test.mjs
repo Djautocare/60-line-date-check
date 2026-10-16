@@ -81,15 +81,18 @@ test('guessed report, line and recheck IDs cannot cross stores; the owner can ac
   for(const user of ['alice','admina']){
    assert.equal((await call('report/'+encodeURIComponent(b.round.id),undefined,user)).status,404);
    assert.equal((await call('lines/verify',{id:b.lines[0].id,ean:'4088600303390',method:'camera'},user)).status,404);
+   assert.equal((await call('lines/no-ean',{id:b.lines[0].id},user)).status,404);
    assert.equal((await call('lines/save',{id:b.lines[0].id,status:'off_sale',quantity:0},user)).status,404);
    assert.equal((await call('rounds/finish',{id:b.round.id},user)).status,404);
    assert.equal((await call('rotation-rechecks',undefined,user)).data.total,0);
    assert.equal((await call('rotation-rechecks/verify',{id:'qb',ean:'4088600303390',method:'camera'},user)).status,404);
+   assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},user)).status,404);
    assert.equal((await call('rotation-rechecks/save',{id:'qb',status:'off_sale'},user)).status,404);
   }
   assert.equal((await call('reports/delete',{id:b.round.id},'admina')).status,404);
   assert.equal((await call('report/'+encodeURIComponent(b.round.id),undefined,'owner','all')).status,200);
   assert.equal((await call('rotation-rechecks',undefined,'owner','all')).data.total,1);
+  assert.equal((await call('rotation-rechecks/no-ean',{id:'qb'},'owner','all')).status,200);
   assert.equal((await call('rotation-rechecks/save',{id:'qb',status:'off_sale'},'owner','all')).status,200);
   assert.equal((await call('reports/delete',{id:b.round.id},'owner','all')).status,200);
   assert.equal((await call('report/'+encodeURIComponent(a.round.id),undefined,'alice')).status,200);

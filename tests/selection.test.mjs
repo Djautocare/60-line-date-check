@@ -1,4 +1,4 @@
-import{test}from'node:test';import assert from'node:assert/strict';import{selectProducts}from'../server/selection.mjs';
+import{test}from'node:test';import assert from'node:assert/strict';import{selectProducts}from'../server/selection.mjs';import{orderByArea,CHECK_AREA_ORDER}from'../shared/area-order.mjs';
 function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 test('risk increases selection frequency while every level remains eligible',()=>{
  const items=[{id:'high',risk:'high'},{id:'normal',risk:'normal'},{id:'low',risk:'low'}],random=rng(234567),counts={high:0,normal:0,low:0};
@@ -19,7 +19,7 @@ test('area counts produce exactly 60 unique risk-weighted products with the requ
  const result=selectDailyProducts(items,counts,rng(1234));assert.equal(result.length,60);assert.equal(new Set(result.map(p=>p.id)).size,60);
  for(const [area,count] of Object.entries(counts))assert.equal(result.filter(p=>p.section===area).length,count);
  assert.notDeepEqual(result.map(p=>p.id),selectDailyProducts(items,counts,rng(5678)).map(p=>p.id));
- assert.deepEqual(selectDailyProducts(items,null,rng(777)),selectProducts(items,60,rng(777)));
+ assert.deepEqual(selectDailyProducts(items,null,rng(777)),orderByArea(selectProducts(items,60,rng(777))));
  assert.equal(items.length,200);
 });
 test('area counts reject invalid totals, fractional counts, unavailable products and malformed settings',async()=>{
@@ -38,4 +38,16 @@ test('area splits preserve risk weighting within an area and can exclude other a
  assert.ok(frequencies.high>frequencies.normal*2);assert.ok(frequencies.normal>frequencies.low*1.5);assert.ok(frequencies.low>250);
  const odd=Array.from({length:60},(_,id)=>({id,section:'__proto__',risk:'normal'}));
  assert.equal(selectDailyProducts(odd,JSON.parse('{"__proto__":60}'),rng(1)).length,60);
+});
+
+test('checks group the selected products in walking order, with stable ordering and other areas last',async()=>{
+ const items=['Long life','Bread','Chilled produce','Short life','Ambient produce','Bread','Z Other','A Other'].map((section,id)=>({id,section}));
+ const original=items.map(p=>({...p}));const sorted=orderByArea(items);
+ assert.deepEqual(sorted.map(p=>p.section),[...CHECK_AREA_ORDER.slice(0,1),'Bread',...CHECK_AREA_ORDER.slice(1),'A Other','Z Other']);
+ assert.deepEqual(sorted.filter(p=>p.section==='Bread').map(p=>p.id),[1,5]);assert.deepEqual(items,original);
+ const {selectDailyProducts}=await import('../server/selection.mjs');
+ const catalogue=CHECK_AREA_ORDER.flatMap(section=>Array.from({length:30},(_,id)=>({section,id:section+id,risk:'normal'})));
+ for(const counts of [null,Object.fromEntries(CHECK_AREA_ORDER.map(section=>[section,12]))]){
+  const chosen=selectDailyProducts(catalogue,counts,rng(123));assert.deepEqual(chosen,orderByArea(chosen));assert.equal(chosen.length,60);assert.equal(new Set(chosen.map(p=>p.id)).size,60);
+ }
 });

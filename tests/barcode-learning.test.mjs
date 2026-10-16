@@ -77,3 +77,43 @@ test('finish and rotation save revalidate an EAN assigned after a provisional sc
  assert.equal((await call('rotation-rechecks/verify',{id:'race',ean:B,method:'camera',confirmUnknown:true},staff)).data.verified,true);await call('barcodes/assign',{ean:B,productId:other.id});
  r=await call('rotation-rechecks/save',{id:'race',status:'okay'},staff);assert.equal(r.status,409);assert.equal(r.data.code,'wrong_product');const q=await db.prepare("SELECT * FROM rotation_rechecks WHERE id='race'").first();assert.equal(q.status,null);assert.equal(q.verified_at,null);
  }finally{await db.close();}});
+test('No EAN unlocks inspection with attribution, clears scan evidence and is excluded from barcode learning',async()=>{const {db,call,product,line}=await setup();try{
+ const p=await product('001234','Loose potatoes'),other=await product('002345','Other product');const id=await line('no-ean',p);
+ await call('lines/verify',{id,ean:A,method:'camera',confirmUnknown:true},staff);
+ const before=(await call('report/no-ean',undefined,staff)).data.lines[0];assert.ok(before.barcode_candidate_id);
+ const marked=await call('lines/no-ean',{id,revision:before.revision},staff);assert.equal(marked.status,200);assert.equal(marked.data.method,'no_ean');
+ let row=(await call('report/no-ean',undefined,staff)).data.lines[0];assert.equal(row.method,'no_ean');assert.equal(row.ean,'');assert.equal(row.barcode_candidate_id,null);assert.equal(row.verified_by,staff.id);assert.ok(row.verified_at);assert.equal(row.status,null);
+ assert.equal((await call('lines/no-ean',{id,revision:before.revision},staff)).status,409);
+ assert.equal((await call('lines/save',{id,status:'okay',quantity:0},admin)).status,400);
+ assert.equal((await call('lines/save',{id,status:'out_of_date',quantity:0},staff)).status,400);
+ // A previous provisional scan does not train or interfere with the no-EAN inspection.
+ await call('barcodes/assign',{ean:A,productId:other.id});
+ assert.equal((await call('lines/save',{id,status:'out_of_date',quantity:2,revision:marked.data.revision},staff)).status,200);
+ assert.equal((await call('rounds/finish',{id:'no-ean'},staff)).status,200);
+ row=(await call('report/no-ean',undefined,staff)).data.lines[0];assert.equal(row.status,'out_of_date');assert.equal(row.quantity,2);assert.equal(row.recorded_by,staff.id);assert.equal(row.method,'no_ean');
+ assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM barcode_observations').first()).n,0);
+ assert.equal((await call('barcodes/lookup',{ean:A})).data.product.id,other.id);
+ assert.equal((await call('lines/no-ean',{id},staff)).status,400);
+ }finally{await db.close();}});
+test('No EAN supports rotation issues and follow-ups without creating barcode candidates',async()=>{const {db,call,product,line}=await setup();try{
+ const p=await product('001234','Loose potatoes');const id=await line('no-ean-rotation',p);
+ assert.equal((await call('lines/no-ean',{id},staff)).status,200);
+ assert.equal((await call('lines/save',{id,status:'rotation_issue',quantity:0},staff)).status,200);
+ assert.equal((await call('rounds/finish',{id:'no-ean-rotation'},staff)).status,200);
+ const q=await db.prepare('SELECT * FROM rotation_rechecks').first();assert.ok(q);
+ assert.equal((await call('rotation-rechecks/no-ean',{id:q.id},staff)).status,400); // future recheck
+ await db.prepare("UPDATE rotation_rechecks SET due_date='2000-01-01' WHERE id=?").bind(q.id).run();
+ assert.equal((await call('rotation-rechecks/save',{id:q.id,status:'okay'},staff)).status,400);
+ assert.equal((await call('rotation-rechecks/no-ean',{id:q.id},staff)).status,200);
+ assert.equal((await call('rotation-rechecks/save',{id:q.id,status:'okay'},admin)).status,400);
+ assert.equal((await call('rotation-rechecks/save',{id:q.id,status:'okay'},staff)).status,200);
+ const saved=await db.prepare('SELECT * FROM rotation_rechecks WHERE id=?').bind(q.id).first();assert.equal(saved.method,'no_ean');assert.equal(saved.scanned_ean,null);assert.equal(saved.checked_by,staff.id);assert.equal(saved.status,'okay');
+ assert.equal((await call('rotation-rechecks/no-ean',{id:q.id},staff)).status,409);
+ for(const table of ['barcode_observations','barcode_candidates'])assert.equal((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n,0);
+ // Off sale still skips inspection, and a later real scan replaces No EAN.
+ const next=await line('switch-back',p);await call('lines/no-ean',{id:next},staff);
+ assert.equal((await call('lines/verify',{id:next,ean:B,method:'manual',confirmUnknown:true},staff)).data.verified,true);
+ const scanned=(await call('report/switch-back',undefined,staff)).data.lines[0];assert.equal(scanned.method,'manual');assert.ok(scanned.barcode_candidate_id);
+ assert.equal((await call('lines/save',{id:next,status:'off_sale',quantity:0},staff)).status,200);
+ assert.equal((await call('report/switch-back',undefined,staff)).data.lines[0].method,null);
+ }finally{await db.close();}});

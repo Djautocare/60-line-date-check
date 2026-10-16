@@ -4,6 +4,7 @@ import { validEAN13, validOutcome } from './ean.mjs';
 import {validDate,nextDate} from '../shared/report-dates.mjs';
 import {selectProducts,selectDailyProducts,validateAreaCounts,SelectionProblem,RISK_WEIGHTS}from './selection.mjs';
 import { publicMember } from './auth.mjs';
+import {orderByArea} from '../shared/area-order.mjs';
 class Problem extends Error {
     status;
     constructor(status, message) {
@@ -140,16 +141,20 @@ async function run(req, db, user) {
         const upcoming=await db.prepare(`SELECT COUNT(*) AS total FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id JOIN rounds r ON r.id=l.round_id WHERE q.status IS NULL AND q.due_date>? ${scope?'AND r.store_id=?':''}`).bind(today(),...(scope?[scope]:[])).first();
         return answer({rechecks:result.results,total:Number(count.total),upcoming:Number(upcoming.total),offset,limit,today:today()});
     }
-    if(req.method==='POST'&&(path==='rotation-rechecks/verify'||path==='rotation-rechecks/save')){
+    if(req.method==='POST'&&['rotation-rechecks/verify','rotation-rechecks/no-ean','rotation-rechecks/save'].includes(path)){
         const recheck=await db.prepare('SELECT q.*,l.ean,l.product_id,l.round_id,r.store_id FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id JOIN rounds r ON r.id=l.round_id WHERE q.id=?').bind(String(body.id)).first();
         must(recheck&&(!scope||recheck.store_id===scope),'Rotation recheck not found.',404);
         must(!recheck.status,'This rotation recheck has already been saved.',409);
         must(recheck.due_date<=today(),'This recheck is scheduled for a future date.');
-        if(path==='rotation-rechecks/verify'){
+        if(path==='rotation-rechecks/verify'||path==='rotation-rechecks/no-ean'){
             const outcome=await barcodeTransaction(db,async c=>{
                 await storeAccess(c,user,recheck.store_id);
                 const current=(await c.query('SELECT * FROM rotation_rechecks WHERE id=$1 FOR UPDATE',[recheck.id])).rows[0];
                 must(current&&!current.status,'This recheck has already been saved.',409);
+                if(path==='rotation-rechecks/no-ean'){
+                    await c.query("UPDATE rotation_rechecks SET verified_at=$1,verified_by=$2,method='no_ean',scanned_ean=NULL WHERE id=$3",[now(),user.id,recheck.id]);
+                    return {verified:true,method:'no_ean'};
+                }
                 const result=await verifyBarcode(c,{productId:recheck.product_id,snapshotEan:recheck.ean,ean:String(body.ean||''),user,method:body.method,confirmUnknown:body.confirmUnknown===true});
                 if(result.verified)await c.query('UPDATE rotation_rechecks SET verified_at=$1,verified_by=$2,method=$3,scanned_ean=$4 WHERE id=$5',[now(),user.id,body.method,body.ean,recheck.id]);
                 else await c.query('UPDATE rotation_rechecks SET verified_at=NULL,verified_by=NULL,method=NULL,scanned_ean=NULL WHERE id=$1',[recheck.id]);
@@ -159,7 +164,7 @@ async function run(req, db, user) {
         }
         must(['okay','rotation_issue','off_sale'].includes(body.status),'Choose Okay now, Still a rotation issue or Off sale.');
         const offSale=body.status==='off_sale';
-        must(offSale||(recheck.verified_at&&recheck.verified_by===user.id),'Scan the product yourself before saving this recheck.');
+        must(offSale||(recheck.verified_at&&recheck.verified_by===user.id),'Verify the product yourself by scanning or choosing No EAN on product before saving this recheck.');
         must(body.quantity===undefined||body.quantity===0,'Rotation rechecks do not take a quantity.');
         const checkedAt=now(),due=nextDate(today());
         const outcome=await barcodeTransaction(db,async c=>{
@@ -167,8 +172,8 @@ async function run(req, db, user) {
             await c.query('SELECT id FROM rounds WHERE id=$1 FOR UPDATE',[recheck.round_id]);
             const current=(await c.query('SELECT q.*,l.product_id,l.ean,l.plu,l.name FROM rotation_rechecks q JOIN lines l ON l.id=q.origin_line_id WHERE q.id=$1 FOR UPDATE OF q',[recheck.id])).rows[0];
             must(current&&!current.status,'This rotation recheck has already been saved.',409);
-            must(offSale||(current.verified_at&&current.verified_by===user.id),'Scan the product yourself before saving this recheck.');
-            if(!offSale){
+            must(offSale||(current.verified_at&&current.verified_by===user.id),'Verify the product yourself by scanning or choosing No EAN on product before saving this recheck.');
+            if(!offSale&&current.method!=='no_ean'){
                 const scanned=current.scanned_ean||current.ean,owner=await barcodeOwner(c,scanned);
                 const wrong=owner&&(current.product_id?owner.id!==current.product_id:owner.plu!==current.plu||owner.name!==current.name);
                 const candidate=(await c.query('SELECT status FROM barcode_candidates WHERE ean=$1 AND product_id=$2',[scanned,current.product_id])).rows[0];
@@ -230,7 +235,7 @@ async function run(req, db, user) {
             }
             const catalogue=(await c.query('SELECT * FROM products')).rows;
             let chosen;
-            if(practice){must(catalogue.length>0,'Add a product first.');chosen=selectProducts(catalogue,Math.min(60,catalogue.length));}
+            if(practice){must(catalogue.length>0,'Add a product first.');chosen=orderByArea(selectProducts(catalogue,Math.min(60,catalogue.length)));}
             else{
                 const saved=(await c.query('SELECT items FROM selections WHERE store_id=$1 AND date=$2',[scope,today()])).rows[0];
                 if(saved)chosen=JSON.parse(saved.items);
@@ -248,16 +253,20 @@ async function run(req, db, user) {
             return {round:(await c.query('SELECT * FROM rounds WHERE id=$1',[id])).rows[0],lines:(await c.query('SELECT l.*,m.name AS recorded_by_name FROM lines l LEFT JOIN members m ON m.id=l.recorded_by WHERE round_id=$1 ORDER BY position',[id])).rows};
         }));
     }
-    if (req.method === 'POST' && (path === 'lines/verify' || path === 'lines/save')) {
+    if (req.method === 'POST' && ['lines/verify','lines/no-ean','lines/save'].includes(path)) {
         const line = await db.prepare('SELECT l.*,r.user_id,r.finished,r.store_id,r.mode FROM lines l JOIN rounds r ON r.id=l.round_id WHERE l.id=?').bind(String(body.id)).first();
         must(roundAccess(line,user,scope),'Check line not found.',404);
         must(!line.finished, 'This check has already been completed.');
-        if (path === 'lines/verify') {
+        if (path === 'lines/verify'||path==='lines/no-ean') {
             const outcome=await barcodeTransaction(db,async c=>{
                 const current=(await c.query('SELECT l.*,r.mode,r.user_id,r.finished,r.store_id FROM lines l JOIN rounds r ON r.id=l.round_id WHERE l.id=$1 FOR UPDATE OF r,l',[line.id])).rows[0];
                 must(roundAccess(current,user,scope)&&!current.finished,'This check has already been completed.');
                 await storeAccess(c,user,current.store_id);
                 if(body.revision!==undefined&&body.revision!==current.revision)throw new BarcodeProblem(409,'Another colleague changed this line. Review the latest result and scan again.',{code:'line_changed',revision:current.revision});
+                if(path==='lines/no-ean'){
+                    await c.query("UPDATE lines SET verified_at=$1,method='no_ean',ean='',barcode_candidate_id=NULL,status=NULL,saved_at=NULL,recorded_by=NULL,verified_by=$2,revision=revision+1 WHERE id=$3",[now(),user.id,current.id]);
+                    return {verified:true,method:'no_ean',revision:current.revision+1};
+                }
                 const result=await verifyBarcode(c,{productId:current.product_id,snapshotEan:current.ean,ean:String(body.ean||''),user,method:body.method,confirmUnknown:body.confirmUnknown===true,practice:current.mode==='practice'});
                 if(result.verified)await c.query(`UPDATE lines SET verified_at=$1,method=$2,ean=$3,barcode_candidate_id=$4,status=NULL,saved_at=NULL,recorded_by=NULL,verified_by=$6,revision=revision+1 WHERE id=$5`,[now(),body.method,body.ean,result.candidateId,current.id,user.id]);
                 else await c.query(`UPDATE lines SET verified_at=NULL,method=NULL,verified_by=NULL,revision=revision+1,barcode_candidate_id=NULL,status=CASE WHEN status='off_sale' THEN status ELSE NULL END,saved_at=CASE WHEN status='off_sale' THEN saved_at ELSE NULL END,recorded_by=CASE WHEN status='off_sale' THEN recorded_by ELSE NULL END WHERE id=$1`,[current.id]);
@@ -267,15 +276,15 @@ async function run(req, db, user) {
             return answer(outcome,outcome.code==='wrong_product'?409:200);
         }
         const offSale=body.status==='off_sale';
-        must(offSale||(line.verified_at&&line.verified_by===user.id),'Scan the product yourself before saving a result.');
+        must(offSale||(line.verified_at&&line.verified_by===user.id),'Verify the product yourself by scanning or choosing No EAN on product before saving a result.');
         must(validOutcome(body.status, body.quantity), ['rotation_issue','off_sale'].includes(body.status)?'Rotation issue and Off sale are recorded without a quantity.':'Out of date and Not stickered need a whole quantity from 1 to 9,999.');
         const saved=await barcodeTransaction(db,async c=>{
             const current=(await c.query('SELECT l.*,r.user_id,r.finished,r.mode,r.store_id FROM lines l JOIN rounds r ON r.id=l.round_id WHERE l.id=$1 FOR UPDATE OF r,l',[line.id])).rows[0];
             must(roundAccess(current,user,scope)&&!current.finished,'This check has already been completed.');
                 await storeAccess(c,user,current.store_id);
                 if(body.revision!==undefined&&body.revision!==current.revision)throw new BarcodeProblem(409,'Another colleague changed this line. Review the latest result and scan again.',{code:'line_changed',revision:current.revision});
-            must(offSale||(current.verified_at&&current.verified_by===user.id),'Scan the product yourself before saving a result.');
-            if(!offSale){
+            must(offSale||(current.verified_at&&current.verified_by===user.id),'Verify the product yourself by scanning or choosing No EAN on product before saving a result.');
+            if(!offSale&&current.method!=='no_ean'){
                 const match=await verifyBarcode(c,{productId:current.product_id,snapshotEan:current.ean,ean:current.ean,user,method:current.method,confirmUnknown:true,practice:current.mode==='practice'});
                 if(!match.verified){await c.query('UPDATE lines SET verified_at=NULL,verified_by=NULL,recorded_by=NULL,method=NULL,status=NULL,saved_at=NULL,revision=revision+1,barcode_candidate_id=NULL WHERE id=$1',[current.id]);return {error:match.error||match.message,code:match.code||'review_denied',product:match.product};}
             }
@@ -290,8 +299,8 @@ async function run(req, db, user) {
             must(roundAccess(round,user,scope),'Check not found.',404);await storeAccess(c,user,round.store_id);
             if(round.finished)return {ok:true,learning:[]};
             const lines=(await c.query('SELECT * FROM lines WHERE round_id=$1 ORDER BY position',[round.id])).rows;
-            must(lines.length>0&&lines.every(l=>l.status&&(l.status==='off_sale'||l.verified_at)),'Every line must be scanned and recorded, or marked Off sale, before finishing.');
-            for(const line of lines.filter(l=>l.status!=='off_sale')){
+            must(lines.length>0&&lines.every(l=>l.status&&(l.status==='off_sale'||l.verified_at)),'Every line must be verified and recorded, or marked Off sale, before finishing.');
+            for(const line of lines.filter(l=>l.status!=='off_sale'&&l.method!=='no_ean')){
                 const owner=await barcodeOwner(c,line.ean);
                 const wrong=owner&&(line.product_id?owner.id!==line.product_id:owner.plu!==line.plu||owner.name!==line.name);
                 const candidate=line.barcode_candidate_id?(await c.query('SELECT status FROM barcode_candidates WHERE id=$1',[line.barcode_candidate_id])).rows[0]:null;
@@ -303,7 +312,7 @@ async function run(req, db, user) {
             const finished=new Date().toISOString();await c.query('UPDATE rounds SET finished=$1,finished_by=$3 WHERE id=$2',[finished,round.id,user.id]);
             await c.query(`INSERT INTO rotation_rechecks(id,origin_line_id,due_date,created) SELECT l.id || ':recheck:' || to_char((($1::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),l.id,to_char((($1::timestamptz AT TIME ZONE 'Europe/London')::date + 1),'YYYY-MM-DD'),$1 FROM lines l WHERE l.round_id=$2 AND $3='daily' AND l.status='rotation_issue' ON CONFLICT DO NOTHING`,[finished,round.id,round.mode]);
             if(round.mode==='daily')await c.query('UPDATE store_daily_checks SET completed_at=$1 WHERE round_id=$2',[finished,round.id]);
-            const learning=[];for(const line of lines.filter(l=>l.status!=='off_sale')){const result=await observeBarcode(c,line,round,user);if(result)learning.push(result);}
+            const learning=[];for(const line of lines.filter(l=>l.status!=='off_sale'&&l.method!=='no_ean')){const result=await observeBarcode(c,line,round,user);if(result)learning.push(result);}
             return {ok:true,learning};
         });
         return answer(outcome,outcome.error?409:200);

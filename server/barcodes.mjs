@@ -29,7 +29,7 @@ export async function verifyBarcode(c,{productId,snapshotEan,ean,user,method,con
  return {verified:true,learning:true,candidateId:candidate?.id||null,mixedCase:hasApproved,observations:count,practice};
 }
 export async function observeBarcode(c,line,round,user){
- if(!line.barcode_candidate_id||round.mode!=='daily')return null;
+ if(!line.barcode_candidate_id||round.mode!=='daily'||line.method==='no_ean')return null;
  const candidate=await one(c,'SELECT * FROM barcode_candidates WHERE id=$1',[line.barcode_candidate_id]);
  if(!candidate||candidate.status!=='pending')return null;
  await c.query(`INSERT INTO barcode_observations(candidate_id,round_id,observed_by,observed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[candidate.id,round.id,line.recorded_by||user.id,now()]);

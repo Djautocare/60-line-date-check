@@ -1,3 +1,4 @@
+import {orderByArea} from '../shared/area-order.mjs';
 export const RISK_WEIGHTS=Object.freeze({high:3,normal:1,low:0.5});
 export const validRisk=value=>Object.hasOwn(RISK_WEIGHTS,value);
 /** Weighted random selection without replacement, using independent exponential clocks. */
@@ -24,10 +25,8 @@ export function validateAreaCounts(counts,products){
 }
 export function selectDailyProducts(products,counts=null,random=Math.random){
  const policy=validateAreaCounts(counts,products);
- if(policy===null)return selectProducts(products,60,random);
+ if(policy===null)return orderByArea(selectProducts(products,60,random));
  const groups=new Map();for(const p of products){if(!groups.has(p.section))groups.set(p.section,[]);groups.get(p.section).push(p);}
  const chosen=Object.entries(policy).flatMap(([area,count])=>count?selectProducts(groups.get(area),count,random):[]);
- // Mix the chosen areas without changing their requested counts.
- for(let i=chosen.length-1;i>0;i--){const j=Math.floor(Math.min(1-Number.EPSILON,Math.max(0,random()))*(i+1));[chosen[i],chosen[j]]=[chosen[j],chosen[i]];}
- return chosen;
+ return orderByArea(chosen);
 }

@@ -74,3 +74,5 @@
 
 .area-selection{padding:24px;margin-bottom:24px}.area-selection fieldset{min-width:0;border:0;padding:0;margin:0}.selection-mode{max-width:400px;margin-bottom:16px}.area-selection table input{width:90px;font-variant-numeric:tabular-nums}.area-selection table td small.error{display:block;white-space:normal;margin-top:6px}.area-selection-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:20px 0}.area-selection-footer p{margin:0;font-weight:650}.area-selection .form-footnote{margin-bottom:0}@media(max-width:600px){.area-selection{padding:18px}.area-selection-footer{align-items:stretch;flex-direction:column}.area-selection-footer .button{width:100%}}
 .regenerate-selection{border-top:1px solid var(--border,#e2e8f0);margin-top:24px;padding-top:20px}.regenerate-selection h3{margin:0 0 8px}.regenerate-selection .form-footnote{margin-top:12px}
+
+.check-card h2.check-product-name{background:#ffeb70;color:#302800;padding:12px 14px;border-radius:7px;line-height:1.35;overflow-wrap:anywhere}.no-ean-option{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}.no-ean-option small{flex:1;min-width:150px}

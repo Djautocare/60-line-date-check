@@ -1,9 +1,10 @@
+import {CHECK_AREA_ORDER} from '../shared/area-order.mjs';
 import {useEffect,useMemo,useState} from 'react';
 import {Camera,Save,Shuffle} from 'lucide-react';
 import type {Product,Risk,Store} from './types';
 
 type Props={products:Product[];store:Store|null;counts:Record<string,number>|null;selection:Product[]|null;owner:boolean;date:string;roundId:string|null;onRegenerated:()=>Promise<void>;request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>;onEditRisk:()=>void};
-const preferred=['Short life','Long life','Ambient produce','Chilled produce','Bread'];
+const preferred:readonly string[]=CHECK_AREA_ORDER;
 const riskLabels:Record<Risk,string>={high:'High risk',normal:'Normal',low:'Low risk'};
 export default function DailySelection({products,store,counts,selection,owner,date,roundId,onRegenerated,request,onChanged,onEditRisk}:Props){
  const available=useMemo(()=>{const result=new Map<string,number>();for(const p of products)result.set(p.section,(result.get(p.section)||0)+1);return result;},[products]);
