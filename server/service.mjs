@@ -5,6 +5,7 @@ import {validDate,nextDate} from '../shared/report-dates.mjs';
 import {selectProducts,selectDailyProducts,validateAreaCounts,SelectionProblem,RISK_WEIGHTS}from './selection.mjs';
 import { publicMember } from './auth.mjs';
 import {orderByArea} from '../shared/area-order.mjs';
+import {productHistory} from './product-history.mjs';
 class Problem extends Error {
     status;
     constructor(status, message) {
@@ -106,6 +107,7 @@ async function run(req, db, user) {
         }));
     }
     if(['barcode-reviews','products/by-plu','barcodes/lookup','barcode-reviews/resolve','barcodes/assign','products/lookup'].includes(path))throw new Problem(410,'Barcode features have been removed. Use the product name and PLU in the catalogue.');
+    if(req.method==='GET'&&['product-history','product-history/search'].includes(path))return answer(await productHistory(db,user,scope,path,new URL(req.url).searchParams,today()));
     if (req.method === 'GET' && path === 'reports') {
         const params = new URL(req.url).searchParams;
         const from = params.get('from') || '', to = params.get('to') || '';

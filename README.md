@@ -188,3 +188,11 @@ Migration 8 automatically allows the direct product-check method in rotation his
 The protected original owner can see **Last logged in** for each person in **Admin portal**, either for a selected store or **All stores**, and use **Refresh** to update the list. Times use Europe/London and show the last successful username/password login. Failed logins, page refreshes, ongoing sessions and logout do not change the value. Other admins and staff cannot see the field, including through login, account, member search or listing API responses. Access follows the protected owner account ID, rather than a username.
 
 Tracking starts when this update is installed. Existing accounts without a recorded login show **No login recorded yet**; no earlier time is inferred. Migration 9 automatically adds the nullable field in the existing database and preserves accounts and reports. No new PostgreSQL database is needed.
+
+### Product history
+
+Open **Product history** and search by product name or six-digit PLU. Administrators can also use the history button beside a product in **Product catalogue**. Results show retained daily selection dates, the saved product name/PLU/area, outcomes (including off sale and pending), issue quantities, the person who checked it, and rotation follow-ups. The summary counts daily selections; follow-ups are listed separately. Practice checks are excluded. Search results and history are paginated.
+
+Staff see their store’s basic history. Store administrators also see exact check times in UK time. The protected original owner can use the store selector for one store or all stores. Renaming a product or changing its PLU keeps its linked history. Deleted/unlinked product snapshots are shown as separate archived records by PLU, so a current product reusing the same PLU does not inherit those records. Deleted reports and overwritten results cannot be reconstructed; this view shows the retained saved results.
+
+**Import an area**, its file chooser, template and preview are available only to the protected original owner (`@admin`). The server also rejects batch imports from other administrators, even one-row batches. Store administrators can still add and edit individual products. Existing databases receive migration 010 automatically at backend startup; no new database is needed.

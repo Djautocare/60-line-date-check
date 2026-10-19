@@ -1,12 +1,12 @@
 import {useEffect,useRef,useState} from 'react';
-import {Download,Loader2,Package,Pencil,Plus,Search,Trash2,X} from 'lucide-react';
+import {Download,History,Loader2,Package,Pencil,Plus,Search,Trash2,X} from 'lucide-react';
 import CatalogueImport from './catalogue-import';
 import {CHECK_AREA_ORDER} from '../shared/area-order.mjs';
 import type {Product,Risk} from './types';
-type Props={owner:boolean;products:Product[];request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>;onExport:()=>void};
+type Props={owner:boolean;products:Product[];request:(path:string,body?:unknown)=>Promise<any>;onChanged:()=>Promise<void>;onExport:()=>void;onHistory:(product:Product)=>void};
 const riskLabels:Record<Risk,string>={high:'High risk',normal:'Normal',low:'Low risk'};
 const empty:Product={id:'',name:'',plu:'',section:'',risk:'normal',ean:''};
-export default function ProductCatalogue({owner,products,request,onChanged,onExport}:Props){
+export default function ProductCatalogue({owner,products,request,onChanged,onExport,onHistory}:Props){
  const [search,setSearch]=useState(''),[area,setArea]=useState(''),[editing,setEditing]=useState<Product|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const areas=Array.from(new Set([...CHECK_AREA_ORDER,...products.map(p=>p.section)]));
  const filtered=products.filter(p=>(!area||p.section===area)&&`${p.name} ${p.plu}`.toLowerCase().includes(search.toLowerCase()));
@@ -16,7 +16,7 @@ export default function ProductCatalogue({owner,products,request,onChanged,onExp
   {error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="report-notice" role="status">{notice}</p>}
   {owner&&<CatalogueImport request={request} onChanged={onChanged}/>}
   <div className="panel catalogue-table"><div className="catalogue-toolbar"><div className="search-input"><Search size={18}/><input aria-label="Search catalogue" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name or PLU…"/></div><select aria-label="Filter area" value={area} onChange={e=>setArea(e.target.value)}><option value="">All areas</option>{areas.map(a=><option key={a}>{a}</option>)}</select></div>
-   {filtered.length?<div className="table-scroll"><table><thead><tr><th>Product</th><th>PLU</th><th>Area / risk</th><th/></tr></thead><tbody>{filtered.map(p=><tr key={p.id}><td><strong>{p.name}</strong></td><td className="mono">{p.plu}</td><td><span className="area-badge">{p.section}</span><small><span className={'risk-badge '+p.risk}>{riskLabels[p.risk||'normal']}</span></small></td><td><div className="table-actions"><button className="icon-btn" disabled={busy} aria-label={'Edit '+p.name} onClick={()=>{setNotice('');setEditing({...p});}}><Pencil size={16}/></button><button disabled={busy} className="icon-btn danger" aria-label={'Delete '+p.name} onClick={()=>void remove(p)}><Trash2 size={16}/></button></div></td></tr>)}</tbody></table></div>:<div className="empty-state"><Package size={36}/><h3>{products.length?'No matching products':'Build your product list'}</h3><p>{products.length?'Try another search or area.':owner?'Import an area’s list or choose Add product.':'Choose Add product to create a catalogue entry.'}</p></div>}
+   {filtered.length?<div className="table-scroll"><table><thead><tr><th>Product</th><th>PLU</th><th>Area / risk</th><th/></tr></thead><tbody>{filtered.map(p=><tr key={p.id}><td><strong>{p.name}</strong></td><td className="mono">{p.plu}</td><td><span className="area-badge">{p.section}</span><small><span className={'risk-badge '+p.risk}>{riskLabels[p.risk||'normal']}</span></small></td><td><div className="table-actions"><button className="icon-btn" aria-label={'History for '+p.name} title="Product history" onClick={()=>onHistory(p)}><History size={16}/></button><button className="icon-btn" disabled={busy} aria-label={'Edit '+p.name} onClick={()=>{setNotice('');setEditing({...p});}}><Pencil size={16}/></button><button disabled={busy} className="icon-btn danger" aria-label={'Delete '+p.name} onClick={()=>void remove(p)}><Trash2 size={16}/></button></div></td></tr>)}</tbody></table></div>:<div className="empty-state"><Package size={36}/><h3>{products.length?'No matching products':'Build your product list'}</h3><p>{products.length?'Try another search or area.':owner?'Import an area’s list or choose Add product.':'Choose Add product to create a catalogue entry.'}</p></div>}
    <div className="table-bottom">{filtered.length} products shown · Catalogue has no 60-product limit</div>
   </div>
   {editing&&<ProductEditor key={editing.id||'new'} product={editing} areas={areas} request={request} onClose={()=>setEditing(null)} onSaved={async()=>{await onChanged();setEditing(null);setNotice('Product saved to the catalogue.');}}/>}
