@@ -14,7 +14,7 @@ export async function storeAdmin(db,user,scope,path,body){
   const admin=(await c.query('SELECT * FROM members WHERE id=$1',[user.id])).rows[0];
   must(admin?.active&&admin.role==='admin','Administrator access has changed.',403);
   must(isOwner||(admin.store_id&&admin.store_id===scope),'No assigned store.',403);
-  const safe=m=>({...publicMember({...m,is_owner:m.id===owner}),created:m.created});
+  const safe=m=>({...publicMember({...m,is_owner:m.id===owner}),created:m.created,...(isOwner?{last_login_at:m.last_login_at||null}:{})});
   if(path==='stores'){
    must(isOwner,'Only the original owner can manage stores.',403);
    return {stores:(await c.query('SELECT * FROM stores ORDER BY number NULLS FIRST,name')).rows};

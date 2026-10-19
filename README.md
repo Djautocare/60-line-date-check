@@ -182,3 +182,9 @@ Install the update by stopping the backend, keeping a database backup and `.env`
 Products no longer need EANs and there is no scan, manual-EAN entry, barcode assignment, barcode review or No EAN button. Save a daily or practice result directly against the selected product name and PLU. Current unfinished checks continue without regeneration. Old scanned results retain their history unless edited, and old barcode assignments/candidates are not deleted or used to gate checks. No new barcode-learning observations are created. Retired scan/review endpoints return an instruction to refresh rather than changing results.
 
 Migration 8 automatically allows the direct product-check method in rotation history and preserves all existing data. No new PostgreSQL database is needed. Stop the backend, replace the project files while keeping `.env`, run `npm install` and `npm run build`, restart the backend and refresh the browser.
+
+### Owner-only last login tracking (migration 9)
+
+The protected original owner can see **Last logged in** for each person in **Admin portal**, either for a selected store or **All stores**, and use **Refresh** to update the list. Times use Europe/London and show the last successful username/password login. Failed logins, page refreshes, ongoing sessions and logout do not change the value. Other admins and staff cannot see the field, including through login, account, member search or listing API responses. Access follows the protected owner account ID, rather than a username.
+
+Tracking starts when this update is installed. Existing accounts without a recorded login show **No login recorded yet**; no earlier time is inferred. Migration 9 automatically adds the nullable field in the existing database and preserves accounts and reports. No new PostgreSQL database is needed.

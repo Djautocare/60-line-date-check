@@ -27,7 +27,7 @@ export async function createApp({db,origin,secureCookie=false}){
    const member=await db.prepare("SELECT m.*,m.id=(SELECT value FROM settings WHERE key='owner') AS is_owner,t.number AS store_number FROM members m LEFT JOIN stores t ON t.id=m.store_id WHERE m.username=?").bind(username).first();
    const valid=await verifyPassword(password,member?.password_hash||dummy);
    if(!valid||!member?.active){const n=previous&&previous.until>t?previous.count+1:1;failures.set(key,{count:n,until:t+15*60*1000});return response({error:'Username or password is incorrect.'},401);}
-   failures.delete(key);const token=newToken();await db.batch([db.prepare('DELETE FROM sessions WHERE expires<?').bind(t),db.prepare('INSERT INTO sessions(token_hash,user_id,expires) VALUES (?,?,?)').bind(tokenHash(token),member.id,t+8*60*60*1000)]);
+   failures.delete(key);const token=newToken();await db.batch([db.prepare('DELETE FROM sessions WHERE expires<?').bind(t),db.prepare('INSERT INTO sessions(token_hash,user_id,expires) VALUES (?,?,?)').bind(tokenHash(token),member.id,t+8*60*60*1000),db.prepare('UPDATE members SET last_login_at=GREATEST(last_login_at,?) WHERE id=?').bind(new Date().toISOString(),member.id)]);
    return response({member:publicMember(member)},200,{'Set-Cookie':cookie(token,8*60*60)});
   }
   const member=await authenticate(req,db);

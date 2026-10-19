@@ -77,3 +77,5 @@
 
 .check-card h2.check-product-name{background:#ffeb70;color:#302800;padding:12px 14px;border-radius:7px;line-height:1.35;overflow-wrap:anywhere}.no-ean-option{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}.no-ean-option small{flex:1;min-width:150px}
 .product-editor{width:min(520px,calc(100% - 28px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--border);border-radius:12px;color:#23312e;background:white;overflow:auto;box-shadow:0 20px 70px #102e3433}.product-editor::backdrop{background:#0d2528a8}.product-editor h2{font-size:22px;margin:0 0 5px}.product-editor .panel-heading{align-items:flex-start}.product-editor form{padding:22px}.product-editor fieldset{border:0;padding:0;margin:0;min-width:0}.product-editor label{margin-bottom:18px}.product-editor .button-row{justify-content:flex-end}.product-editor .error{margin:16px 0 0}
+
+.login-tracking-note{padding:0 22px;margin:16px 0;font-size:12px}
