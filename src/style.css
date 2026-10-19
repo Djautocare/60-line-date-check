@@ -84,3 +84,5 @@
 
 /* A softer match to the product-name highlight; keep risk badges unchanged. */
 .product-identifiers>.check-plu{display:inline-flex;align-items:center;background:rgba(255,235,112,.6);color:#5b4a00;padding:6px 10px;border-radius:6px}.product-identifiers>.check-plu strong{color:#302800;font-weight:650}
+
+.report-duration{font-weight:650;color:#395143}.report-duration-note{display:block;font-weight:400;margin-top:5px;max-width:640px}

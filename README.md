@@ -196,3 +196,9 @@ Open **Product history** and search by product name or six-digit PLU. Administra
 Staff see their store’s basic history. Store administrators also see exact check times in UK time. The protected original owner can use the store selector for one store or all stores. Renaming a product or changing its PLU keeps its linked history. Deleted/unlinked product snapshots are shown as separate archived records by PLU, so a current product reusing the same PLU does not inherit those records. Deleted reports and overwritten results cannot be reconstructed; this view shows the retained saved results.
 
 **Import an area**, its file chooser, template and preview are available only to the protected original owner (`@admin`). The server also rejects batch imports from other administrators, even one-row batches. Store administrators can still add and edit individual products. Existing databases receive migration 010 automatically at backend startup; no new database is needed.
+
+### Report completion duration
+
+Store administrators and the protected owner see **Date / type / time completed in** in Reports. Completed checks show elapsed hours, minutes and seconds between the saved start and finish timestamps. Unfinished checks show **Not completed**; invalid or missing historical timestamps show **Completion time unavailable**. The same duration appears in report detail/print and in administrators’ filtered-summary CSV exports, including a numeric seconds column for pilot comparisons. Staff retain the basic date/type view and exports without duration columns. No database migration is needed.
+
+This is elapsed wall-clock time for the shared check, including breaks, pauses and gaps between contributors. It does not measure active staff labour or prove a time saving; compare equivalent checks and a measured baseline when evaluating a pilot.

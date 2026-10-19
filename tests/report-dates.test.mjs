@@ -27,3 +27,19 @@ test('per-product Checked at uses saved UK time, handles daylight saving and doe
  assert.equal(formatCheckTime('2026-07-01T23:15:09.000Z'),'02/07/2026, 00:15:09');
  for(const value of [null,undefined,'','not a time'])assert.equal(formatCheckTime(value),'—');
 });
+test('completion duration uses real elapsed seconds across midnight and daylight-saving changes',async()=>{
+ const {elapsedCheckSeconds,formatCheckDuration}=await import('../src/report-order.mjs');
+ assert.equal(elapsedCheckSeconds('2026-10-19T08:00:00Z','2026-10-19T08:12:34.999Z'),754);
+ assert.equal(formatCheckDuration('2026-10-19T08:00:00Z','2026-10-19T08:12:34.999Z'),'12m 34s');
+ assert.equal(formatCheckDuration('2026-10-19T23:50:00Z','2026-10-20T01:02:03Z'),'1h 12m 3s');
+ assert.equal(formatCheckDuration('2026-10-25T01:45:00+01:00','2026-10-25T01:15:00+00:00'),'30m 0s');
+ assert.equal(formatCheckDuration('2026-10-19T08:00:00Z','2026-10-20T09:00:00Z'),'25h 0m 0s');
+ assert.equal(formatCheckDuration('2026-10-19T08:00:00Z','2026-10-19T08:00:00Z'),'0s');
+ assert.equal(formatCheckDuration('2026-10-19T08:00:00Z','2026-10-19T08:00:09Z'),'9s');
+});
+test('unfinished, missing, invalid and reversed completion timestamps have no invented duration',async()=>{
+ const {elapsedCheckSeconds,formatCheckDuration}=await import('../src/report-order.mjs');
+ for(const [start,end] of [[null,null],['2026-10-19T08:00:00Z',null],[null,'2026-10-19T08:12:00Z'],['bad','2026-10-19T08:12:00Z'],['2026-10-19T08:00:00Z','bad'],['2026-10-19T08:12:00Z','2026-10-19T08:00:00Z']]){
+  assert.equal(elapsedCheckSeconds(start,end),null);assert.equal(formatCheckDuration(start,end),'—');
+ }
+});
