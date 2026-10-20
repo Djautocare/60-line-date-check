@@ -202,3 +202,11 @@ Staff see their store’s basic history. Store administrators also see exact che
 Store administrators and the protected owner see **Date / type / time completed in** in Reports. Completed checks show elapsed hours, minutes and seconds between the saved start and finish timestamps. Unfinished checks show **Not completed**; invalid or missing historical timestamps show **Completion time unavailable**. The same duration appears in report detail/print and in administrators’ filtered-summary CSV exports, including a numeric seconds column for pilot comparisons. Staff retain the basic date/type view and exports without duration columns. No database migration is needed.
 
 This is elapsed wall-clock time for the shared check, including breaks, pauses and gaps between contributors. It does not measure active staff labour or prove a time saving; compare equivalent checks and a measured baseline when evaluating a pilot.
+
+### Daily 60 home-screen icon
+
+The selected yellow **60** and cream tick design is included in the Android web app manifest and the iPhone/iPad Apple touch icon. Home-screen installs use the name **Daily 60** and request standalone display. The same artwork is the browser tab icon. Android uses the regular icon purpose so the launcher can add its own padding and mask without clipping the design.
+
+After installing the update, run `npm run build` and restart the backend. On iPhone, open the HTTPS site in Safari and use **Share → Add to Home Screen**. On Android, open it in Chrome and use the menu’s **Install app** or **Add to Home screen** option, depending on the browser. Existing shortcuts may keep the old artwork; remove the shortcut and add it again if needed. This change adds app identity and launch settings; checks still require an internet connection.
+
+Icon files: `public/icons/daily60-v1-192.png`, `public/icons/daily60-v1-512.png`, `public/icons/daily60-v1-favicon.png`, and `public/apple-touch-icon.png`. The artwork was generated with the built-in image tool using the approved “Daily 60” concept: bold yellow 60, cream tick and lime daily arc on forest green. Exports preserve that selected composition.

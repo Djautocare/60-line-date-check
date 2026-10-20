@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "DateCheck — Daily 60",
+  "short_name": "Daily 60",
+  "description": "Shared daily 60-line date checks, product history and rotation follow-ups.",
+  "lang": "en-GB",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#153d36",
+  "icons": [
+    {
+      "src": "/icons/daily60-v1-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/daily60-v1-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
