@@ -12,7 +12,9 @@
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "check:db": "node --env-file-if-exists=.env server/check-db.mjs"
+    "check:db": "node --env-file-if-exists=.env server/check-db.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "test:postgres": "node --test tests/postgres-concurrency.test.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

@@ -2,8 +2,8 @@ import {barcodeTransaction,BarcodeProblem} from './barcodes.mjs';
 import {hashPassword,validPassword,validUsername,publicMember} from './auth.mjs';
 const must=(ok,msg,status=400)=>{if(!ok)throw new BarcodeProblem(status,msg);};
 export async function storeAccess(c,user,storeId){
- const current=(await c.query("SELECT m.*,m.id=(SELECT value FROM settings WHERE key='owner') AS is_owner FROM members m WHERE id=$1",[user.id])).rows[0];
- must(current?.active&&(current.is_owner||current.store_id===storeId),'Your store access has changed. Refresh and sign in again.',403);
+ const current=(await c.query("SELECT m.*,m.id=(SELECT value FROM settings WHERE key='owner') AS is_owner FROM members m WHERE id=$1 FOR SHARE OF m",[user.id])).rows[0];
+ must(current?.active&&current.role===user.role&&(current.is_owner||current.store_id===storeId),'Your store access has changed. Refresh and sign in again.',403);
 }
 export function roundAccess(round,user,scope){return round&&(!scope||round.store_id===scope)&&(user.role==='admin'||round.mode==='daily'||round.user_id===user.id);}
 export async function storeAdmin(db,user,scope,path,body){

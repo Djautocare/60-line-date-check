@@ -210,3 +210,32 @@ The selected yellow **60** and cream tick design is included in the Android web 
 After installing the update, run `npm run build` and restart the backend. On iPhone, open the HTTPS site in Safari and use **Share → Add to Home Screen**. On Android, open it in Chrome and use the menu’s **Install app** or **Add to Home screen** option, depending on the browser. Existing shortcuts may keep the old artwork; remove the shortcut and add it again if needed. This change adds app identity and launch settings; checks still require an internet connection.
 
 Icon files: `public/icons/daily60-v1-192.png`, `public/icons/daily60-v1-512.png`, `public/icons/daily60-v1-favicon.png`, and `public/apple-touch-icon.png`. The artwork was generated with the built-in image tool using the approved “Daily 60” concept: bold yellow 60, cream tick and lime daily arc on forest green. Exports preserve that selected composition.
+
+## Performance and multi-store checks
+
+Daily check refreshes use `GET /api/state?view=daily`. The initial page load and catalogue/selection management still load the full state. Subsequent daily refreshes send the selected check and its results, without resending the entire product catalogue. A version supplied with `since` lets the server return a 99-byte unchanged response when progress has not changed. This is a private, authenticated response with `Cache-Control: no-store`; it is not a shared browser or proxy cache. Store/role changes, a new London date, saved results, regenerated checks, completion and report deletion invalidate the version. Per-product timestamp visibility continues to follow the signed-in account's permissions.
+
+Refreshes run about every 8–12 seconds, spread out to avoid every phone polling together. They pause while the page is hidden, refresh when the user returns, and do not start another background request while one is pending. Foreground saves take priority over older refresh responses. Opening catalogue management reloads the catalogue so edits by colleagues appear.
+
+Check writes now use a PostgreSQL transaction lock per store, instead of a single lock shared by every store. Staff in one store still share a single daily check, and stale result revisions are rejected. Creating its 60 line snapshots uses one bulk insert. Database connections remain capped at 10 per backend process. Text, JSON and JavaScript responses larger than 1 KB use fast asynchronous gzip when the client accepts it; existing image files and tiny responses are left as-is.
+
+This update needs no new database, password changes or additional migration. To install it, stop the DateCheck backend, update the repository files **while keeping your existing `.env`**, run `npm install` and `npm run build`, then launch the backend again and reload the website on each device. The frontend and backend should be updated together.
+
+### Repeatable load test
+
+Use a **separate test PostgreSQL database**, not the live store database. The harness requires `DATECHECK_TEST_DATABASE_URL` explicitly and does not load `.env`. It creates a uniquely named test schema, applies the normal migrations there, seeds synthetic data, and drops only that schema afterwards. The test login needs permission to create schemas. If the process is forcibly terminated, its `datecheck_test_...` schema may remain for manual cleanup in the test database.
+
+In PowerShell, using the credentials for that test database:
+
+```powershell
+$env:DATECHECK_TEST_DATABASE_URL='postgresql://TEST_USER:TEST_PASSWORD@localhost:5432/datecheck60_test'
+npm run test:postgres
+npm run benchmark -- 200
+Remove-Item Env:DATECHECK_TEST_DATABASE_URL
+```
+
+URL-encode special characters in test credentials. The normal `npm test` suite skips the two real PostgreSQL concurrency tests when this variable is absent. The concurrency tests deliberately hold a store lock, prove another store can finish a request while that lock remains held, race shared starts and stale saves, and verify membership revocation waits for an in-flight write before taking effect.
+
+The benchmark runs a local HTTP server with the real login/session code, service routes, compression and a 10-connection PostgreSQL pool. It measures login, initial load, starting a shared check, unchanged/changed refreshes, all 60 result saves and completion. It fails on unexpected HTTP responses or incorrect saved totals. Numbers are printed as JSON, including response body sizes and p50/p95 latency. Run it away from the live service's busiest period, since it consumes CPU and database resources.
+
+Validation on 21 October 2026 used Node 24 and PostgreSQL 18 in the development environment, with 907 synthetic products and 200 simulated stores signing in and submitting results in parallel bursts. All 200 checks completed: **12,000 saved results, 25,600 HTTP requests, zero errors, 28.01 seconds total**. Save latency was p50 122 ms / p95 166 ms; changed refresh latency was p50 175 ms / p95 233 ms. Example response bodies were 123,591 bytes for the initial full state (27,575 bytes with gzip), 26,617 bytes for a changed check (2,963 bytes with gzip), and 99 bytes for an unchanged refresh. Sizes vary with product names, identifiers and recorded results. These are local synthetic measurements, not a capacity guarantee or a measurement of the Windows laptop, Wi-Fi, broadband or Cloudflare Tunnel. The real pilot should still monitor that host's response times, CPU/RAM, database growth and outages.

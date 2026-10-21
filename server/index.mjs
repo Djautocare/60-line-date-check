@@ -1,3 +1,4 @@
+import {writeHttpResponse} from './http-response.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
@@ -62,12 +63,12 @@ export async function startServer(){
     let body='';for await(const chunk of req){body+=chunk.toString();if(Buffer.byteLength(body)>500000){res.writeHead(413);res.end(JSON.stringify({error:'Request is too large.'}));return;}}
     const headers=new Headers();for(const [k,v] of Object.entries(req.headers))if(v!==undefined)headers.set(k,Array.isArray(v)?v.join(','):v);
     const request=new Request(url,{method:req.method,headers,...(req.method==='GET'||req.method==='HEAD'?{}:{body:body||'{}'})});
-    const result=await app(request,req.socket.remoteAddress);res.writeHead(result.status,Object.fromEntries(result.headers));res.end(Buffer.from(await result.arrayBuffer()));return;
+    const result=await app(request,req.socket.remoteAddress);await writeHttpResponse(req,res,result.status,result.headers,Buffer.from(await result.arrayBuffer()));return;
    }
    if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);res.end();return;}
    let filename=resolve(dist,`.${decodeURIComponent(url.pathname)}`);if(filename!==dist&&!filename.startsWith(dist+sep)){res.writeHead(404);res.end();return;}
    try{if(!(await stat(filename)).isFile())filename=resolve(dist,'index.html');}catch{if(extname(url.pathname)){res.writeHead(404);res.end();return;}filename=resolve(dist,'index.html');}
-   const content=await readFile(filename);res.setHeader('Content-Type',mime[extname(filename)]||'application/octet-stream');res.setHeader('Cache-Control',filename.includes(`${sep}assets${sep}`)?'public, max-age=31536000, immutable':'no-cache');res.writeHead(200);res.end(req.method==='HEAD'?undefined:content);
+   const content=await readFile(filename);res.setHeader('Content-Type',mime[extname(filename)]||'application/octet-stream');res.setHeader('Cache-Control',filename.includes(`${sep}assets${sep}`)?'public, max-age=31536000, immutable':'no-cache');await writeHttpResponse(req,res,200,res.getHeaders(),content);
   }catch(e){console.error('Request failed:',e.message);if(!res.headersSent)res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Something went wrong. Please try again.'}));}
  });
  await new Promise((ok,no)=>{server.once('error',no);server.listen(port,process.env.HOST||'127.0.0.1',ok);});
