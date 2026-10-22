@@ -1,3 +1,4 @@
+import {validWalkingGroup} from '../shared/area-order.mjs';
 import {validEAN13} from './ean.mjs';
 export class BarcodeProblem extends Error {constructor(status,message,details={}){super(message);this.status=status;this.details=details;}}
 const must=(ok,msg,status=400,details={})=>{if(!ok)throw new BarcodeProblem(status,msg,details);};
@@ -73,8 +74,8 @@ export async function barcodeAdmin(path,body,params,db,user){
 }
 export async function importCatalogue(db,body,user){
  const items=Array.isArray(body.items)?body.items:[body];must(items.length>0&&items.length<=2000,'Import between 1 and 2,000 products.');
- const clean=items.map(p=>({id:p.id?String(p.id):null,name:String(p.name||'').trim(),plu:String(p.plu||'').trim(),section:String(p.section||p.area||'').trim(),risk:p.risk===undefined?null:String(p.risk)}));
- for(const p of clean){must(p.name.length>0&&p.name.length<=160,'Every product needs a name of up to 160 characters.');must(/^\d{6}$/.test(p.plu),'Every product needs a 6-digit PLU. Keep leading zeros.');must(p.section.length>0&&p.section.length<=80,'Every product needs an area of up to 80 characters.');must(p.risk===null||['high','normal','low'].includes(p.risk),'Choose High risk, Normal or Low risk.');}
+ const clean=items.map(p=>({id:p.id?String(p.id):null,name:String(p.name||'').trim(),plu:String(p.plu||'').trim(),section:String(p.section||p.area||'').trim(),risk:p.risk===undefined?null:String(p.risk),walking_group:p.walking_group}));
+ for(const p of clean){must(p.name.length>0&&p.name.length<=160,'Every product needs a name of up to 160 characters.');must(/^\d{6}$/.test(p.plu),'Every product needs a 6-digit PLU. Keep leading zeros.');must(p.section.length>0&&p.section.length<=80,'Every product needs an area of up to 80 characters.');must(p.risk===null||['high','normal','low'].includes(p.risk),'Choose High risk, Normal or Low risk.');must(p.walking_group===undefined||p.walking_group===null||validWalkingGroup(p.walking_group),'Choose a valid walking position or Automatic.');}
  must(new Set(clean.map(p=>p.plu)).size===clean.length,'Your import contains duplicate PLUs. Review these rows first.');
  return barcodeTransaction(db,async c=>{
   if(Object.hasOwn(body,'items')){const owner=await one(c,"SELECT id FROM members WHERE id=$1 AND active=1 AND role='admin' AND id=(SELECT value FROM settings WHERE key='owner')",[user.id]);must(owner,'Only the protected original owner can import CSV products.',403);}
@@ -84,8 +85,8 @@ export async function importCatalogue(db,body,user){
    if(!p.id){const matches=(await c.query('SELECT * FROM products WHERE plu=$1',[p.plu])).rows;must(matches.length<=1,`PLU ${p.plu} already has several catalogue products. Edit those individually before importing.`);existing=matches[0];}
    const id=existing?.id||crypto.randomUUID();
    const duplicate=await one(c,'SELECT id FROM products WHERE plu=$1 AND id<>$2 LIMIT 1',[p.plu,id]);must(!duplicate,`PLU ${p.plu} already belongs to another product. Edit that product or choose a different PLU.`,409);
-   if(existing)await c.query('UPDATE products SET name=$1,plu=$2,section=$3,risk=COALESCE($4,risk) WHERE id=$5',[p.name,p.plu,p.section,p.risk,id]);
-   else await c.query("INSERT INTO products(id,name,plu,ean,section,risk) VALUES($1,$2,$3,NULL,$4,COALESCE($5,'normal'))",[id,p.name,p.plu,p.section,p.risk]);
+   if(existing)await c.query('UPDATE products SET name=$1,plu=$2,section=$3,risk=COALESCE($4,risk),walking_group=CASE WHEN $5 THEN $6::text ELSE walking_group END WHERE id=$7',[p.name,p.plu,p.section,p.risk,p.walking_group!==undefined,p.walking_group??null,id]);
+   else await c.query("INSERT INTO products(id,name,plu,ean,section,risk,walking_group) VALUES($1,$2,$3,NULL,$4,COALESCE($5,'normal'),$6)",[id,p.name,p.plu,p.section,p.risk,p.walking_group??null]);
   }
   return {ok:true,count:clean.length};
  });

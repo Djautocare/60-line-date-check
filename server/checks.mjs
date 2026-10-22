@@ -19,9 +19,9 @@ export function liveVersion(member,store,date,sharedCheck,round,lineCount,revisi
 export async function insertCheckLines(c,roundId,chosen){
  const ids=chosen.map(p=>p.id);
  await c.query('SELECT id FROM products WHERE id=ANY($1::text[]) ORDER BY id FOR KEY SHARE',[ids]);
- const rows=chosen.map((p,i)=>({id:roundId+':'+i,name:p.name,plu:p.plu,ean:p.ean||'',section:p.section,position:i+1,risk:p.risk||'normal',product_id:p.id}));
- await c.query(`INSERT INTO lines(id,round_id,name,ean,plu,section,position,risk,product_id)
-  SELECT x.id,$1,x.name,x.ean,x.plu,x.section,x.position,x.risk,p.id
-  FROM jsonb_to_recordset($2::jsonb) AS x(id text,name text,ean text,plu text,section text,position integer,risk text,product_id text)
+ const rows=chosen.map((p,i)=>({id:roundId+':'+i,name:p.name,plu:p.plu,ean:p.ean||'',section:p.section,position:i+1,risk:p.risk||'normal',product_id:p.id,walking_group:p.walking_group||null}));
+ await c.query(`INSERT INTO lines(id,round_id,name,ean,plu,section,position,risk,product_id,walking_group)
+  SELECT x.id,$1,x.name,x.ean,x.plu,x.section,x.position,x.risk,p.id,x.walking_group
+  FROM jsonb_to_recordset($2::jsonb) AS x(id text,name text,ean text,plu text,section text,position integer,risk text,product_id text,walking_group text)
   LEFT JOIN products p ON p.id=x.product_id`,[roundId,JSON.stringify(rows)]);
 }
